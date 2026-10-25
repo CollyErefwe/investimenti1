@@ -1,7 +1,7 @@
 """Interfaccia Streamlit del comitato di ricerca azionaria.
 
 Avvio:  streamlit run app.py
-Richiede nella stessa cartella main.py (MODELLO, chiedi_agente, client)
+Richiede nella stessa cartella main.py (MODELLO, chiedi_agente)
 e report_html.py.
 """
 import re
@@ -12,16 +12,15 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
-from main import MODELLO, chiedi_agente, client
+from main import MODELLO, chiedi_agente
 from report_html import (
     calcola_metriche,
     dati_per_agenti,
-    estrai_campi,
     genera_report,
     tabella_metriche,
 )
 
-st.set_page_config(page_title="Comitato di ricerca azionaria", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Analisi investimento azionario", page_icon="📈", layout="wide")
 
 # Aspetto della pagina: stessi colori e carattere del report.
 st.markdown(
@@ -38,7 +37,6 @@ header[data-testid="stHeader"]{background:transparent}
 .voce{border-left:3px solid #1d4e6e;padding-left:.9rem;margin-bottom:1.1rem}
 .vt{font-family:Georgia,"Times New Roman",serif;font-size:1rem;font-weight:700;color:#17202b;margin-bottom:.3rem}
 .vp{color:#566273;font-size:.9rem;line-height:1.5}
-.responsabile{border-left:3px solid #d6dbe2;padding-left:.9rem;margin-top:1.6rem;max-width:46rem}
 [data-testid="InputInstructions"]{display:none}
 div[data-baseweb="input"]:focus-within,div[data-baseweb="base-input"]:focus-within{border-color:#1d4e6e !important;box-shadow:none !important}
 [data-testid="stForm"]{border:0;padding:0}
@@ -48,9 +46,6 @@ button[kind^="primary"]:hover,button[data-testid^="stBaseButton-primary"]:hover{
 """,
     unsafe_allow_html=True,
 )
-
-# Pause tra le chiamate, per restare nei limiti di richieste del piano Groq.
-PAUSA_PRE_RESPONSABILE = 10
 
 REGOLE = (
     " Usa SOLO i dati forniti e non inventare cifre: se un dato manca scrivi N/D. "
@@ -78,12 +73,6 @@ ISTRUZIONI = {
     ),
 }
 
-REGOLA_PUNTEGGIO = (
-    "Il punteggio misura insieme la qualità del business e la convenienza del prezzo attuale: "
-    "80-100 business eccellente a un prezzo ragionevole; 60-79 buon business con prezzo pieno o qualche dubbio; "
-    "40-59 equilibrio tra pregi e difetti; sotto 40 rischi o prezzo che prevalgono."
-)
-
 
 @st.cache_data(ttl=900, show_spinner=False)
 def scarica_info(ticker: str) -> dict:
@@ -92,7 +81,7 @@ def scarica_info(ticker: str) -> dict:
 
 def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log) -> dict:
     """Quattro analisti lavorano in modo indipendente sulla stessa scheda dati
-    (nessuno legge le risposte degli altri); poi il responsabile le confronta."""
+    (nessuno legge le risposte degli altri)."""
     dati = dati_per_agenti(nome, ticker, info, m)
 
     log("Analista contabile")
@@ -107,67 +96,20 @@ def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log) -> dict:
     log("Economista macro e di settore")
     macro = chiedi_agente("Economista Macro", ISTRUZIONI["macro"] + REGOLE, dati, max_t=400, pausa=4)
 
-    log("Responsabile del comitato: confronto delle analisi")
-    time.sleep(PAUSA_PRE_RESPONSABILE)
-    prompt = (
-        f"DATI:\n{dati}\n\n"
-        f"ANALISI CONTABILE:\n{contabile}\n\n"
-        f"TESI RIALZISTA:\n{bull}\n\n"
-        f"TESI RIBASSISTA:\n{bear}\n\n"
-        f"MACRO E SETTORE:\n{macro}\n\n"
-        "COMPITO: confronta le analisi e controlla che siano coerenti con i dati numerici; "
-        "se una affermazione contraddice i dati, segnalalo nella sintesi. "
-        f"{REGOLA_PUNTEGGIO}\n"
-        "Rispondi con queste righe, senza altro testo:\n"
-        "GIUDIZIO: [MOLTO FAVOREVOLE, FAVOREVOLE, NEUTRALE, SFAVOREVOLE]\n"
-        "SCORE: [numero intero da 1 a 100]\n"
-        "SINTESI: [2 o 3 frasi: perché questo giudizio, tenendo conto del prezzo]\n"
-        "CAMBIA_IDEA: [1 o 2 frasi: quali fatti o quale prezzo cambierebbero il giudizio]"
-    )
-    risposta = client.chat.completions.create(
-        model=MODELLO,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Sei il responsabile di un comitato di ricerca azionaria. Sintetizzi il lavoro di quattro "
-                    "analisti indipendenti usando solo i dati e le analisi forniti. Non dai istruzioni operative "
-                    "personalizzate e non usi formule come 'acquista' o 'vendi'."
-                ),
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-        max_tokens=450,
-        extra_body={"reasoning_format": "hidden"},
-    )
-    testo = risposta.choices[0].message.content or ""
-    if "</think>" in testo:
-        testo = testo.split("</think>")[-1].strip()
-
-    campi = estrai_campi(testo)
-    trovato = re.search(r"\d+", campi.get("SCORE", ""))
-    score = min(100, max(1, int(trovato.group()))) if trovato else None  # se manca resta N/D, nessun valore inventato
-
     return {
-        "giudizio": campi.get("GIUDIZIO"),
-        "score": score,
-        "sintesi": campi.get("SINTESI") or (testo if not campi else None),
-        "cambia_idea": campi.get("CAMBIA_IDEA"),
         "bull": bull,
         "bear": bear,
         "contabile": contabile,
         "macro": macro,
-        "_grezzo": testo,
     }
 
 
 # ------------------------------------------------------------------ pagina
 
 st.markdown(
-    '<div class="testata"><div class="titolo">Comitato di ricerca azionaria</div>'
+    '<div class="testata"><div class="titolo">Analisi investimento azionario</div>'
     '<div class="sottotitolo">Un report di una pagina su un titolo, preparato da quattro analisti AI '
-    "indipendenti e riassunto da un responsabile.</div></div>",
+    "indipendenti.</div></div>",
     unsafe_allow_html=True,
 )
 
@@ -242,7 +184,6 @@ if risultato:
             ("Tesi rialzista", "bull"),
             ("Tesi ribassista", "bear"),
             ("Macro e settore", "macro"),
-            ("Risposta completa del responsabile", "_grezzo"),
         ):
             with st.expander(titolo):
                 st.markdown(esito.get(chiave) or "Nessuna risposta.")
@@ -259,10 +200,7 @@ else:
     )
     st.markdown(
         '<div class="sez">Quattro analisti, ciascuno per conto suo</div>'
-        f'<div class="elenco">{riquadri}</div>'
-        '<div class="responsabile"><div class="vt">Poi il responsabile del comitato</div>'
-        '<div class="vp">Confronta le quattro analisi con i dati e assegna un giudizio con un punteggio da 1 a 100. '
-        "Gli analisti non leggono le risposte degli altri, così le loro conclusioni restano indipendenti.</div></div>",
+        f'<div class="elenco">{riquadri}</div>',
         unsafe_allow_html=True,
     )
 
