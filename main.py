@@ -1,16 +1,19 @@
 import html
+import os
 import re
 import time
 import yfinance as yf
-from groq import APIStatusError, Groq
+from groq import Groq
 
 # ------------------------------------------------------------------
 # CONFIGURAZIONE API GROQ
+# La chiave va impostata come variabile d'ambiente GROQ_API_KEY
+# (es. in terminale: export GROQ_API_KEY="la_tua_nuova_chiave")
 # ------------------------------------------------------------------
 CHIAVE_GROQ = "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"
-
 client = Groq(api_key=CHIAVE_GROQ)
 MODELLO = "openai/gpt-oss-120b"
+
 
 def chiedi_agente(
     ruolo: str,
@@ -19,24 +22,24 @@ def chiedi_agente(
     max_t: int = 800,
     pausa: int = 6,
 ) -> str:
-  print(f"[>] Al lavoro: {ruolo}...")
-  time.sleep(pausa)
+    print(f"[>] Al lavoro: {ruolo}...")
+    time.sleep(pausa)
 
-  prompt = (
-      f"Ruolo: {ruolo}\n"
-      f"Obiettivo: {compito}\n\n"
-      f"DATI:\n{contesto}\n\n"
-      "VINCOLI TASSATIVI:\n"
-      "- Rispondi ESCLUSIVAMENTE in lingua italiana.\n"
-      "- Scrivi solo 2 punti elenco preceduti da trattino '- '.\n"
-      "- Ogni punto deve essere una singola frase di massimo 18 parole.\n"
-      "- Termina OBBLIGATORIAMENTE ogni riga con il punto fermo '.' prima di"
-      " fermarti.\n"
-      "- Nessun preambolo, nessun commento in inglese."
-  )
+    prompt = (
+        f"Ruolo: {ruolo}\n"
+        f"Obiettivo: {compito}\n\n"
+        f"DATI:\n{contesto}\n\n"
+        "VINCOLI TASSATIVI:\n"
+        "- Rispondi ESCLUSIVAMENTE in lingua italiana.\n"
+        "- Scrivi solo 2 punti elenco preceduti da trattino '- '.\n"
+        "- Ogni punto deve essere una singola frase di massimo 18 parole.\n"
+        "- Termina OBBLIGATORIAMENTE ogni riga con il punto fermo '.' prima di"
+        " fermarti.\n"
+        "- Nessun preambolo, nessun commento in inglese."
+    )
 
-  tentativi = 3
-  for tentativo in range(tentativi):
+    tentativi = 3
+    for tentativo in range(tentativi):
         try:
             risposta = client.chat.completions.create(
                 model=MODELLO,
@@ -51,7 +54,7 @@ def chiedi_agente(
                     {"role": "user", "content": prompt},
                 ],
                 temperature=1,
-                max_completion_tokens=2048,
+                max_completion_tokens=3050,
             )
 
             testo = risposta.choices[0].message.content
@@ -75,44 +78,37 @@ def chiedi_agente(
                 print(f"[!] Errore API: {e}")
                 time.sleep(3)
 
-  return "- Dati al momento non disponibili per sovraccarico API."
+    return "- Dati al momento non disponibili per sovraccarico API."
 
 
 def genera_scheda_html(
     ticker: str, nome_az: str, dati: dict, sintesi: dict, file_html: str
 ):
-  def format_val(val, suffix="", is_pct=False, is_curr=False):
-    if val is None or val == "N/D":
-      return "N/D"
-    try:
-      num = float(val)
-      if is_pct:
-        return f"{num * 100:.1f}%"
-      if is_curr:
-        if abs(num) >= 1e9:
-          return f"${num / 1e9:.2f} B"
-        if abs(num) >= 1e6:
-          return f"${num / 1e6:.2f} M"
-        return f"${num:,.2f}"
-      return f"{num:.2f}{suffix}"
-    except Exception:
-      return str(val)
+    def format_val(val, suffix="", is_pct=False, is_curr=False):
+        if val is None or val == "N/D":
+            return "N/D"
+        try:
+            num = float(val)
+            if is_pct:
+                return f"{num * 100:.1f}%"
+            if is_curr:
+                if abs(num) >= 1e9:
+                    return f"${num / 1e9:.2f} B"
+                if abs(num) >= 1e6:
+                    return f"${num / 1e6:.2f} M"
+                return f"${num:,.2f}"
+            return f"{num:.2f}{suffix}"
+        except Exception:
+            return str(val)
 
-  def format_text(testo: str) -> str:
-    if not testo:
-      return "Dato non disponibile."
-    testo_pulito = html.escape(str(testo))
-    testo_pulito = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", testo_pulito)
-    return testo_pulito.replace("\n", "<br>")
+    def format_text(testo: str) -> str:
+        if not testo:
+            return "Dato non disponibile."
+        testo_pulito = html.escape(str(testo))
+        testo_pulito = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", testo_pulito)
+        return testo_pulito.replace("\n", "<br>")
 
-  verdetto_raw = sintesi.get("verdetto", "BUY").upper()
-  badge_class = "badge-hold"
-  if "BUY" in verdetto_raw:
-    badge_class = "badge-buy"
-  elif "SELL" in verdetto_raw:
-    badge_class = "badge-sell"
-
-  html_content = f"""<!DOCTYPE html>
+    html_content = f"""<!DOCTYPE html>
 <html lang="it">
 <head>
 <meta charset="UTF-8">
@@ -157,29 +153,6 @@ def genera_scheda_html(
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }}
-    .badge {{
-        display: inline-block;
-        font-size: 13px;
-        font-weight: 800;
-        padding: 6px 14px;
-        border-radius: 4px;
-        text-transform: uppercase;
-    }}
-    .badge-buy {{
-        background-color: #dcfce7;
-        color: #166534;
-        border: 1px solid #86efac;
-    }}
-    .badge-hold {{
-        background-color: #fef3c7;
-        color: #92400e;
-        border: 1px solid #fde047;
-    }}
-    .badge-sell {{
-        background-color: #fee2e2;
-        color: #991b1b;
-        border: 1px solid #fca5a5;
-    }}
 
     .grid-kpi {{
         display: grid;
@@ -205,52 +178,6 @@ def genera_scheda_html(
         font-weight: 700;
         color: #0f172a;
         margin-top: 3px;
-    }}
-
-    .verdict-box {{
-        background: linear-gradient(135deg, #0f172a, #1e293b);
-        color: #f8fafc;
-        padding: 12px 16px;
-        border-radius: 6px;
-        margin-bottom: 14px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 16px;
-    }}
-    .verdict-left {{
-        flex: 1;
-    }}
-    .verdict-left .label-v {{
-        font-size: 10px;
-        color: #94a3b8;
-        text-transform: uppercase;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-    }}
-    .verdict-left .desc-v {{
-        font-size: 12px;
-        margin-top: 5px;
-        color: #f1f5f9;
-        line-height: 1.45;
-    }}
-    .score-circle {{
-        text-align: center;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        padding: 8px 16px;
-        border-radius: 6px;
-        min-width: 90px;
-    }}
-    .score-circle .score-num {{
-        font-size: 24px;
-        font-weight: 800;
-        color: #38bdf8;
-    }}
-    .score-circle .score-label {{
-        font-size: 9px;
-        color: #94a3b8;
-        text-transform: uppercase;
     }}
 
     .two-col {{
@@ -306,8 +233,7 @@ def genera_scheda_html(
         <div class="sub">Equity Research Committee Report &bull; Settore: {dati.get('sector', 'N/D')} &bull; Industria: {dati.get('industry', 'N/D')}</div>
     </div>
     <div class="meta-box" style="text-align: right;">
-        <div class="badge {badge_class}">{verdetto_raw}</div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 4px;">Data: {time.strftime('%d/%m/%Y')}</div>
+        <div style="font-size: 10px; color: #64748b;">Data: {time.strftime('%d/%m/%Y')}</div>
     </div>
 </div>
 
@@ -335,17 +261,6 @@ def genera_scheda_html(
     <div class="kpi-card">
         <div class="label">Cassa vs Debito</div>
         <div class="val">{format_val(dati.get('totalCash'), is_curr=True)} / {format_val(dati.get('totalDebt'), is_curr=True)}</div>
-    </div>
-</div>
-
-<div class="verdict-box">
-    <div class="verdict-left">
-        <div class="label-v">Verdetto Esecutivo del Portfolio Manager</div>
-        <div class="desc-v">{format_text(sintesi.get('verdetto_dettaglio'))}</div>
-    </div>
-    <div class="score-circle">
-        <div class="score-num">{sintesi.get('score', '75')}</div>
-        <div class="score-label">Score / 100</div>
     </div>
 </div>
 
@@ -379,214 +294,124 @@ def genera_scheda_html(
 </body>
 </html>
 """
-  with open(file_html, "w", encoding="utf-8") as f:
-    f.write(html_content)
+    with open(file_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
 
 
 def analizza_azienda(ticker: str):
-  print("\n" + "=" * 55)
-  print(f" COMITATO DI INVESTIMENTO: ANALISI {ticker}")
-  print("=" * 55)
+    print("\n" + "=" * 55)
+    print(f" COMITATO DI INVESTIMENTO: ANALISI {ticker}")
+    print("=" * 55)
 
-  print(f"[>] Recupero dati finanziari per {ticker}...")
-  stock = yf.Ticker(ticker)
+    print(f"[>] Recupero dati finanziari per {ticker}...")
+    stock = yf.Ticker(ticker)
 
-  try:
-    dati = stock.info
-    if not dati or dati.get("longName") is None:
-      print(f"[!] Errore: Ticker '{ticker}' non valido o non trovato.\n")
-      return None
-  except Exception as e:
-    print(f"[!] Errore Yahoo Finance: {e}\n")
-    return None
+    try:
+        dati = stock.info
+        if not dati or dati.get("longName") is None:
+            print(f"[!] Errore: Ticker '{ticker}' non valido o non trovato.\n")
+            return None
+    except Exception as e:
+        print(f"[!] Errore Yahoo Finance: {e}\n")
+        return None
 
-  nome_azienda = dati.get("longName", ticker)
-  sintesi_dati = (
-      f"Azienda: {nome_azienda} ({ticker})\n"
-      f"Settore: {dati.get('sector', 'N/D')}\n"
-      f"Prezzo: {dati.get('currentPrice', 'N/D')} USD\n"
-      f"P/E Forward: {dati.get('forwardPE', 'N/D')} | PEG:"
-      f" {dati.get('pegRatio', 'N/D')}\n"
-      f"Margine Netto: {dati.get('profitMargins', 'N/D')} | ROE:"
-      f" {dati.get('returnOnEquity', 'N/D')}\n"
-      f"Free Cash Flow: {dati.get('freeCashflow', 'N/D')} USD\n"
-      f"Debito: {dati.get('totalDebt', 'N/D')} USD | Cassa:"
-      f" {dati.get('totalCash', 'N/D')} USD\n"
-      f"Target Mean Analisti: {dati.get('targetMeanPrice', 'N/D')} USD\n"
-  )
+    nome_azienda = dati.get("longName", ticker)
+    sintesi_dati = (
+        f"Azienda: {nome_azienda} ({ticker})\n"
+        f"Settore: {dati.get('sector', 'N/D')}\n"
+        f"Prezzo: {dati.get('currentPrice', 'N/D')} USD\n"
+        f"P/E Forward: {dati.get('forwardPE', 'N/D')} | PEG:"
+        f" {dati.get('pegRatio', 'N/D')}\n"
+        f"Margine Netto: {dati.get('profitMargins', 'N/D')} | ROE:"
+        f" {dati.get('returnOnEquity', 'N/D')}\n"
+        f"Free Cash Flow: {dati.get('freeCashflow', 'N/D')} USD\n"
+        f"Debito: {dati.get('totalDebt', 'N/D')} USD | Cassa:"
+        f" {dati.get('totalCash', 'N/D')} USD\n"
+        f"Target Mean Analisti: {dati.get('targetMeanPrice', 'N/D')} USD\n"
+    )
 
-  # 1. Agente Contabile
-  res_contabile = chiedi_agente(
-      ruolo="Analista Contabile Forense",
-      compito=(
-          "Valuta in 2 punti concisi la solidita di cassa (FCF), debito e"
-          " qualita margini."
-      ),
-      contesto=sintesi_dati,
-      max_t=900,
-      pausa=6,
-  )
+    # 1. Agente Contabile
+    res_contabile = chiedi_agente(
+        ruolo="Analista Contabile Forense",
+        compito=(
+            "Valuta in 2 punti concisi la solidita di cassa (FCF), debito e"
+            " qualita margini."
+        ),
+        contesto=sintesi_dati,
+        max_t=800,
+        pausa=6,
+    )
 
-  # 2. Agente Bull
-  res_bull = chiedi_agente(
-      ruolo="Analista Bull",
-      compito=(
-          "Presenta in 2 punti concisi i fattori di crescita duraturi e il"
-          " vantaggio competitivo."
-      ),
-      contesto=f"{sintesi_dati}\nContabile:\n{res_contabile}",
-      max_t=900,
-      pausa=6,
-  )
+    # 2. Agente Bull
+    res_bull = chiedi_agente(
+        ruolo="Analista Bull",
+        compito=(
+            "Presenta in 2 punti concisi i fattori di crescita duraturi e il"
+            " vantaggio competitivo."
+        ),
+        contesto=f"{sintesi_dati}\nContabile:\n{res_contabile}",
+        max_t=800,
+        pausa=6,
+    )
 
-  # 3. Agente Bear
-  res_bear = chiedi_agente(
-      ruolo="Analista Bear",
-      compito=(
-          "Esposti in 2 punti concisi i principali rischi di valutazione e"
-          " concorrenza."
-      ),
-      contesto=f"{sintesi_dati}\nBull:\n{res_bull}",
-      max_t=900,
-      pausa=6,
-  )
+    # 3. Agente Bear
+    res_bear = chiedi_agente(
+        ruolo="Analista Bear",
+        compito=(
+            "Esposti in 2 punti concisi i principali rischi di valutazione e"
+            " concorrenza."
+        ),
+        contesto=f"{sintesi_dati}\nBull:\n{res_bull}",
+        max_t=800,
+        pausa=6,
+    )
 
-  # 4. Agente Macro
-  res_macro = chiedi_agente(
-      ruolo="Economista Macro",
-      compito=(
-          "Inquadra in 2 punti concisi l'impatto del ciclo tassi sul settore"
-          f" {dati.get('sector')}."
-      ),
-      contesto=sintesi_dati,
-      max_t=900,
-      pausa=6,
-  )
+    # 4. Agente Macro
+    res_macro = chiedi_agente(
+        ruolo="Economista Macro",
+        compito=(
+            "Inquadra in 2 punti concisi l'impatto del ciclo tassi sul settore"
+            f" {dati.get('sector')}."
+        ),
+        contesto=sintesi_dati,
+        max_t=800,
+        pausa=6,
+    )
 
- # 5. Lead Portfolio Manager
-  quadro_pm = (
-      f"TITOLO: {ticker}\n"
-      f"PREZZO: {dati.get('currentPrice')} USD | TARGET:"
-      f" {dati.get('targetMeanPrice')} USD\n"
-      f"P/E FWD: {dati.get('forwardPE')}\n"
-      f"PUNTI CHIAVE:\n"
-      f"Bull: {res_bull}\n"
-      f"Bear: {res_bear}\n"
-  )
+    dati_sintesi = {
+        "contabile": res_contabile,
+        "bull": res_bull,
+        "bear": res_bear,
+        "macro": res_macro,
+    }
 
-  prompt_pm = """
-Analizza il quadro fornito ed emetti il verdetto per l'investitore.
-Rispondi RIGOROSAMENTE con queste 4 righe (non aggiungere altro testo o preamboli):
-VERDETTO: [BUY / STRONG BUY / HOLD / SELL]
-SCORE: [un numero intero da 1 a 100]
-SINTESI: [2 frasi complete che riassumono la tesi d'investimento e i rischi principali]
-CAMBIO_GIUDIZIO: [1 frase concreta su cosa cambierebbe la valutazione]
-"""
+    file_md = f"scheda_{ticker}.md"
+    with open(file_md, "w", encoding="utf-8") as f:
+        f.write(f"# SCHEDA ESECUTIVA: {nome_azienda} ({ticker})\n\n")
+        f.write(f"### Contabile\n{dati_sintesi['contabile']}\n\n")
+        f.write(f"### Bull\n{dati_sintesi['bull']}\n\n")
+        f.write(f"### Bear\n{dati_sintesi['bear']}\n\n")
+        f.write(f"### Macro\n{dati_sintesi['macro']}\n")
 
-  print("\n[i] Elaborazione verdetto Portfolio Manager...")
-  time.sleep(2)
-  prompt_pm_completo = f"DATI AZIENDALI:\n{quadro_pm}\n\nISTRUZIONI:\n{prompt_pm}"
+    file_html = f"scheda_{ticker}.html"
+    genera_scheda_html(ticker, nome_azienda, dati, dati_sintesi, file_html)
 
-  # Valori di default
-  verdetto_val = "HOLD"
-  score_val = "50"
-  sintesi_pm = "Analisi completata regolarmente."
-  cambio_giudizio_val = "Variazione significativa nei margini o nella crescita ricavi."
+    print(f"\n[+] File Markdown salvato: {file_md}")
+    print(f"[+] Scheda Grafica One-Pager salvata: {file_html}")
 
-  try:
-        risp = client.chat.completions.create(
-            model=MODELLO,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Sei il Portfolio Manager istituzionale. Rispondi esclusivamente nel formato richiesto senza preamboli.",
-                },
-                {"role": "user", "content": prompt_pm_completo},
-            ],
-            temperature=1,
-            max_completion_tokens=2048,
-        )
-
-        testo_raw = risp.choices[0].message.content or ""
-        
-        # Rimozione eventuale blocco di reasoning
-        if "</think>" in testo_raw:
-            testo_raw = testo_raw.split("</think>")[-1].strip()
-
-        print(f"\n--- [DEBUG TESTO PM RICEVUTO] ---\n{testo_raw}\n---------------------------------")
-
-        # Parser robusto (insensibile a markdown, maiuscole/minuscole e spazi)
-        for riga in testo_raw.splitlines():
-            pulita = riga.replace("*", "").replace("#", "").strip()
-            alta = pulita.upper()
-
-            if alta.startswith("VERDETTO:"):
-                val = pulita.split(":", 1)[1].strip()
-                if val:
-                    verdetto_val = val
-            elif alta.startswith("SCORE:"):
-                val = pulita.split(":", 1)[1].strip()
-                cifre = "".join(c for c in val if c.isdigit())
-                if cifre:
-                    score_val = cifre
-            elif alta.startswith("SINTESI:"):
-                val = pulita.split(":", 1)[1].strip()
-                if val:
-                    sintesi_pm = val
-            elif alta.startswith("CAMBIO_GIUDIZIO:") or "CAMBIEREBBE" in alta:
-                val = pulita.split(":", 1)[1].strip()
-                if val:
-                    cambio_giudizio_val = val
-
-        # Fallback se non ha trovato la riga 'SINTESI:'
-        if sintesi_pm == "Analisi completata regolarmente." and len(testo_raw) > 30:
-            sintesi_pm = testo_raw.split("\n")[0].strip()
-
-  except Exception as e:
-        print(f"[!] Errore Portfolio Manager: {e}")
-        verdetto_val = "ERRORE"
-        score_val = "0"
-        sintesi_pm = f"ERRORE API: {str(e)}"
-
-  dati_sintesi = {
-      "verdetto": verdetto_val,
-      "score": score_val,
-      "verdetto_dettaglio": sintesi_pm,
-      "contabile": res_contabile,
-      "bull": res_bull,
-      "bear": res_bear,
-      "macro": res_macro,
-  }
-
-  file_md = f"scheda_{ticker}.md"
-  with open(file_md, "w", encoding="utf-8") as f:
-    f.write(f"# SCHEDA ESECUTIVA: {nome_azienda} ({ticker})\n\n")
-    f.write(f"**Verdetto:** {verdetto_val} | **Score:** {score_val}/100\n\n")
-    f.write(f"{sintesi_pm}\n\n---\n")
-    f.write(f"### Contabile\n{res_contabile}\n\n")
-    f.write(f"### Bull\n{res_bull}\n\n")
-    f.write(f"### Bear\n{res_bear}\n\n")
-    f.write(f"### Macro\n{res_macro}\n") 
-
-  file_html = f"scheda_{ticker}.html"
-  genera_scheda_html(ticker, nome_azienda, dati, dati_sintesi, file_html)
-
-  print(f"\n[+] File Markdown salvato: {file_md}")
-  print(f"[+] Scheda Grafica One-Pager salvata: {file_html}")
-
-  return dati_sintesi
+    return dati_sintesi
 
 
 if __name__ == "__main__":
-  print("=" * 60)
-  print(" COMITATO DI INVESTIMENTO - REPORT GENERATOR ISTITUZIONALE")
-  print("=" * 60)
+    print("=" * 60)
+    print(" COMITATO DI INVESTIMENTO - REPORT GENERATOR ISTITUZIONALE")
+    print("=" * 60)
 
-  input_utente = input("\nInserisci un ticker (es. V oppure NVDA, AAPL): ")
-  tickers = [t.strip().upper() for t in input_utente.split(",") if t.strip()]
+    input_utente = input("\nInserisci un ticker (es. V oppure NVDA, AAPL): ")
+    tickers = [t.strip().upper() for t in input_utente.split(",") if t.strip()]
 
-  for idx, t in enumerate(tickers, start=1):
-    analizza_azienda(t)
-    if idx < len(tickers):
-      print("\n[i] Attesa di sicurezza prima del prossimo ticker...")
-      time.sleep(15)
+    for idx, t in enumerate(tickers, start=1):
+        analizza_azienda(t)
+        if idx < len(tickers):
+            print("\n[i] Attesa di sicurezza prima del prossimo ticker...")
+            time.sleep(15)
