@@ -475,28 +475,31 @@ def analizza_azienda(ticker: str):
   )
 
   prompt_pm = """
-Emetti il verdetto per il cliente. Rispondi con queste 3 righe esatte:
-VERDETTO: [STRONG BUY / BUY / HOLD / SELL]
-SCORE: [Numero da 1 a 100]
-SINTESI: [Spiegazione pratica per il cliente in 2 frasi complete]
+Analizza il quadro fornito ed emetti il verdetto per l'investitore.
+Rispondi RIGOROSAMENTE con queste 4 righe (non aggiungere altro testo o preamboli):
+VERDETTO: [BUY / STRONG BUY / HOLD / SELL]
+SCORE: [un numero intero da 1 a 100]
+SINTESI: [2 frasi complete che riassumono la tesi d'investimento e i rischi principali]
+CAMBIO_GIUDIZIO: [1 frase concreta su cosa cambierebbe la valutazione]
 """
 
-  print("\n[i] Sincronizzazione comitato prima del verdetto finale...")
-  time.sleep(12)
-  prompt_pm_completo = f"DATI:\n{quadro_pm}\n\n{prompt_pm}"
-    
+  print("\n[i] Elaborazione verdetto Portfolio Manager...")
+  time.sleep(2)
+  prompt_pm_completo = f"DATI AZIENDALI:\n{quadro_pm}\n\nISTRUZIONI:\n{prompt_pm}"
+
+  # Valori di default
+  verdetto_val = "HOLD"
+  score_val = "50"
+  sintesi_pm = "Analisi completata regolarmente."
+  cambio_giudizio_val = "Variazione significativa nei margini o nella crescita ricavi."
+
   try:
         risp = client.chat.completions.create(
             model=MODELLO,
             messages=[
                 {
                     "role": "system",
-                    "content": (
-                        "Sei il Portfolio Manager istituzionale. Rispondi SOLO con questo formato esatto:\n"
-                        "VERDETTO: [BUY / STRONG BUY / HOLD / SELL]\n"
-                        "SCORE: [un numero intero da 1 a 100]\n"
-                        "SINTESI: [2 frasi complete che riassumono il giudizio sul titolo]"
-                    ),
+                    "content": "Sei il Portfolio Manager istituzionale. Rispondi esclusivamente nel formato richiesto senza preamboli.",
                 },
                 {"role": "user", "content": prompt_pm_completo},
             ],
@@ -504,56 +507,46 @@ SINTESI: [Spiegazione pratica per il cliente in 2 frasi complete]
             max_completion_tokens=2048,
         )
 
-        report_pm = risp.choices[0].message.content or ""
-        if "</think>" in report_pm:
-            report_pm = report_pm.split("</think>")[-1].strip()
+        testo_raw = risp.choices[0].message.content or ""
+        
+        # Rimozione eventuale blocco di reasoning
+        if "</think>" in testo_raw:
+            testo_raw = testo_raw.split("</think>")[-1].strip()
 
-        print(f"\n[DEBUG RISPOSTA PM]:\n{report_pm}\n" + "-" * 30)
+        print(f"\n--- [DEBUG TESTO PM RICEVUTO] ---\n{testo_raw}\n---------------------------------")
 
-        # Valori predefiniti di sicurezza
-        verdetto_val = "HOLD"
-        score_val = "50"
-        sintesi_pm = ""
+        # Parser robusto (insensibile a markdown, maiuscole/minuscole e spazi)
+        for riga in testo_raw.splitlines():
+            pulita = riga.replace("*", "").replace("#", "").strip()
+            alta = pulita.upper()
 
-        for line in report_pm.splitlines():
-            # Rimuove eventuali asterischi markdown o spazi extra
-            line_clean = line.replace("*", "").strip()
-            line_upper = line_clean.upper()
+            if alta.startswith("VERDETTO:"):
+                val = pulita.split(":", 1)[1].strip()
+                if val:
+                    verdetto_val = val
+            elif alta.startswith("SCORE:"):
+                val = pulita.split(":", 1)[1].strip()
+                cifre = "".join(c for c in val if c.isdigit())
+                if cifre:
+                    score_val = cifre
+            elif alta.startswith("SINTESI:"):
+                val = pulita.split(":", 1)[1].strip()
+                if val:
+                    sintesi_pm = val
+            elif alta.startswith("CAMBIO_GIUDIZIO:") or "CAMBIEREBBE" in alta:
+                val = pulita.split(":", 1)[1].strip()
+                if val:
+                    cambio_giudizio_val = val
 
-            if line_upper.startswith("VERDETTO:"):
-                verdetto_val = line_clean.split(":", 1)[1].strip()
-            elif line_upper.startswith("SCORE:"):
-                score_raw = line_clean.split(":", 1)[1].strip()
-                numeri = "".join(c for c in score_raw if c.isdigit())
-                score_val = numeri if numeri else "50"
-            elif line_upper.startswith("SINTESI:"):
-                sintesi_pm = line_clean.split(":", 1)[1].strip()
-
-        # Se la sintesi non è su una riga singola con etichetta, usa l'intero testo restituito
-        if not sintesi_pm and len(report_pm) > 10:
-            sintesi_pm = report_pm
+        # Fallback se non ha trovato la riga 'SINTESI:'
+        if sintesi_pm == "Analisi completata regolarmente." and len(testo_raw) > 30:
+            sintesi_pm = testo_raw.split("\n")[0].strip()
 
   except Exception as e:
         print(f"[!] Errore Portfolio Manager: {e}")
-        verdetto_val = "Non determinato"
-        score_val = "N/D"
-        sintesi_pm = "Sintesi non disponibili."
-  
-  report_pm = risp.choices[0].message.content or ""
-  if "</think>" in report_pm:
-        report_pm = report_pm.split("</think>")[-1].strip()
-
-  verdetto_val = "BUY"
-  score_val = "75"
-  sintesi_pm = report_pm
-
-  for line in report_pm.splitlines():
-    if "VERDETTO:" in line:
-      verdetto_val = line.replace("VERDETTO:", "").strip()
-    elif "SCORE:" in line:
-      score_val = line.replace("SCORE:", "").strip().replace("/100", "")
-    elif "SINTESI:" in line:
-      sintesi_pm = line.replace("SINTESI:", "").strip()
+        verdetto_val = "ERRORE"
+        score_val = "0"
+        sintesi_pm = f"ERRORE API: {str(e)}"
 
   dati_sintesi = {
       "verdetto": verdetto_val,
