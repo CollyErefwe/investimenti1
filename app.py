@@ -23,6 +23,32 @@ from report_html import (
 
 st.set_page_config(page_title="Comitato di ricerca azionaria", page_icon="📈", layout="wide")
 
+# Aspetto della pagina: stessi colori e carattere del report.
+st.markdown(
+    """
+<style>
+.block-container{padding-top:2.2rem;max-width:1100px}
+[data-testid="stToolbar"],[data-testid="stDecoration"],footer{display:none}
+header[data-testid="stHeader"]{background:transparent}
+.testata{border-bottom:2px solid #17202b;padding-bottom:.9rem;margin-bottom:1.5rem}
+.titolo{font-family:Georgia,"Times New Roman",serif;font-size:2rem;font-weight:700;line-height:1.15;color:#17202b}
+.sottotitolo{color:#566273;margin-top:.35rem}
+.sez{font-family:Georgia,"Times New Roman",serif;font-size:1.1rem;font-weight:700;color:#17202b;margin:2.2rem 0 .8rem}
+.elenco{max-width:46rem}
+.voce{border-left:3px solid #1d4e6e;padding-left:.9rem;margin-bottom:1.1rem}
+.vt{font-family:Georgia,"Times New Roman",serif;font-size:1rem;font-weight:700;color:#17202b;margin-bottom:.3rem}
+.vp{color:#566273;font-size:.9rem;line-height:1.5}
+.responsabile{border-left:3px solid #d6dbe2;padding-left:.9rem;margin-top:1.6rem;max-width:46rem}
+[data-testid="InputInstructions"]{display:none}
+div[data-baseweb="input"]:focus-within,div[data-baseweb="base-input"]:focus-within{border-color:#1d4e6e !important;box-shadow:none !important}
+[data-testid="stForm"]{border:0;padding:0}
+button[kind^="primary"],button[data-testid^="stBaseButton-primary"]{background:#1d4e6e;border-color:#1d4e6e;color:#fff}
+button[kind^="primary"]:hover,button[data-testid^="stBaseButton-primary"]:hover{background:#163d57;border-color:#163d57;color:#fff}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 # Pause tra le chiamate, per restare nei limiti di richieste del piano Groq.
 PAUSA_PRE_RESPONSABILE = 10
 
@@ -138,17 +164,23 @@ def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log) -> dict:
 
 # ------------------------------------------------------------------ pagina
 
-st.title("Comitato di ricerca azionaria")
-st.caption("Un report di una pagina su un titolo, preparato da quattro analisti AI indipendenti e riassunto da un responsabile.")
+st.markdown(
+    '<div class="testata"><div class="titolo">Comitato di ricerca azionaria</div>'
+    '<div class="sottotitolo">Un report di una pagina su un titolo, preparato da quattro analisti AI '
+    "indipendenti e riassunto da un responsabile.</div></div>",
+    unsafe_allow_html=True,
+)
 
-with st.sidebar:
-    st.subheader("Titolo da analizzare")
-    ticker_input = st.text_input("Ticker", value="V", help="Esempi: V, AAPL, ENI.MI").upper().strip()
-    avvia = st.button("Genera report", type="primary", use_container_width=True)
-    st.caption(
-        "Strumento di analisi automatica. Non è consulenza in materia di investimenti. "
-        "I dati vengono da Yahoo Finance e le analisi da modelli linguistici: verifica le cifre."
+with st.form("ricerca"):  # con il form, Invio nel campo avvia l'analisi
+    colonna_ticker, colonna_pulsante, _ = st.columns([2, 1.3, 5])
+    ticker_input = (
+        colonna_ticker.text_input(
+            "Ticker", placeholder="Ticker, per esempio V o ENI.MI", label_visibility="collapsed"
+        )
+        .upper()
+        .strip()
     )
+    avvia = colonna_pulsante.form_submit_button("Genera report", type="primary", use_container_width=True)
 
 if avvia:
     if not re.fullmatch(r"[A-Z0-9.\-=^]{1,15}", ticker_input):
@@ -215,4 +247,28 @@ if risultato:
             with st.expander(titolo):
                 st.markdown(esito.get(chiave) or "Nessuna risposta.")
 else:
-    st.info("Inserisci un ticker nella barra laterale e premi Genera report.")
+    voci = (
+        ("Analisi contabile", "Free cash flow, debito, margini e ROE: quanto sono solidi i numeri."),
+        ("Tesi rialzista", "Le ragioni più solide per cui l'azienda può crescere o rivalutarsi."),
+        ("Tesi ribassista", "I rischi più seri e i segnali che li confermerebbero."),
+        ("Macro e settore", "Come tassi, ciclo e regolamentazione incidono su questo settore."),
+    )
+    riquadri = "".join(
+        f'<div class="voce"><div class="vt">{titolo}</div><div class="vp">{testo}</div></div>'
+        for titolo, testo in voci
+    )
+    st.markdown(
+        '<div class="sez">Quattro analisti, ciascuno per conto suo</div>'
+        f'<div class="elenco">{riquadri}</div>'
+        '<div class="responsabile"><div class="vt">Poi il responsabile del comitato</div>'
+        '<div class="vp">Confronta le quattro analisi con i dati e assegna un giudizio con un punteggio da 1 a 100. '
+        "Gli analisti non leggono le risposte degli altri, così le loro conclusioni restano indipendenti.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+st.write("")
+st.caption(
+    "Strumento di analisi automatica.  \n"
+    "Non è consulenza in materia di investimenti.  \n"
+    "I dati vengono da Yahoo Finance e le analisi da modelli linguistici: verifica le cifre."
+)
