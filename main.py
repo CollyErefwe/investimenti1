@@ -12,13 +12,12 @@ CHIAVE_GROQ = "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"
 client = Groq(api_key=CHIAVE_GROQ)
 MODELLO = "openai/gpt-oss-120b"
 
-
 def chiedi_agente(
     ruolo: str,
     compito: str,
     contesto: str,
-    max_t: int = 550,
-    pausa: int = 5,
+    max_t: int = 800,
+    pausa: int = 6,
 ) -> str:
   print(f"[>] Al lavoro: {ruolo}...")
   time.sleep(pausa)
@@ -38,58 +37,45 @@ def chiedi_agente(
 
   tentativi = 3
   for tentativo in range(tentativi):
-    try:
-      risposta = client.chat.completions.create(
-          model=MODELLO,
-          messages=[
-              {
-                  "role": "system",
-                  "content": (
-                      "Sei un equity analyst istituzionale. Rispondi"
-                      " direttamente in italiano con 2 punti elenco numerici"
-                      " concisi e completi."
-                  ),
-              },
-              {"role": "user", "content": prompt},
-          ],
-          temperature=0.1,
-          max_tokens=max_t,
-          extra_body={"reasoning_format": "hidden"},
-      )
+        try:
+            risposta = client.chat.completions.create(
+                model=MODELLO,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Sei un equity analyst istituzionale. Rispondi "
+                            "esclusivamente in lingua italiana con 2 punti elenco chiari, completi e sintetici."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=1,
+                max_completion_tokens=2048,
+            )
 
-      testo = risposta.choices[0].message.content
-      if testo and testo.strip():
-        testo_pulito = testo.strip()
+            testo = risposta.choices[0].message.content
+            if testo and testo.strip():
+                testo_pulito = testo.strip()
 
-        # Pulizia da eventuali residui di thinking
-        if "</think>" in testo_pulito:
-          testo_pulito = testo_pulito.split("</think>")[-1].strip()
+                if "</think>" in testo_pulito:
+                    testo_pulito = testo_pulito.split("</think>")[-1].strip()
 
-        # Protezione anti-taglio: se l'ultima frase non ha il punto, chiudi all'ultimo punto valido
-        if not testo_pulito.endswith("."):
-          ultimo_punto = testo_pulito.rfind(".")
-          if ultimo_punto != -1:
-            testo_pulito = testo_pulito[: ultimo_punto + 1]
+                print(f"    [OK] Risposta completata ({len(testo_pulito)} caratteri)")
+                return testo_pulito
 
-        print(f"    [OK] Risposta completata ({len(testo_pulito)} caratteri)")
-        return testo_pulito
+            time.sleep(3)
 
-      time.sleep(4)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "rate_limit" in err_msg or "429" in err_msg:
+                print(f"[!] Limite Groq raggiunto, attesa di 15 secondi... (tentativo {tentativo + 1}/{tentativi})")
+                time.sleep(15)
+            else:
+                print(f"[!] Errore API: {e}")
+                time.sleep(3)
 
-    except APIStatusError as e:
-      if "rate_limit_exceeded" in str(e) or e.status_code in [413, 429]:
-        print(
-            "[!] Finestra TPM satura: attesa di 25 secondi per liberare il"
-            f" contatore (tentativo {tentativo + 1}/{tentativi})..."
-        )
-        time.sleep(25)
-      else:
-        raise e
-    except Exception as e:
-      print(f"[!] Errore durante la chiamata: {e}")
-      time.sleep(4)
-
-  return "- Analisi sintetica al momento non disponibile."
+  return "- Dati al momento non disponibili per sovraccarico API."
 
 
 def genera_scheda_html(
@@ -437,8 +423,8 @@ def analizza_azienda(ticker: str):
           " qualita margini."
       ),
       contesto=sintesi_dati,
-      max_t=450,
-      pausa=2,
+      max_t=900,
+      pausa=6,
   )
 
   # 2. Agente Bull
@@ -449,8 +435,8 @@ def analizza_azienda(ticker: str):
           " vantaggio competitivo."
       ),
       contesto=f"{sintesi_dati}\nContabile:\n{res_contabile}",
-      max_t=450,
-      pausa=4,
+      max_t=900,
+      pausa=6,
   )
 
   # 3. Agente Bear
@@ -461,8 +447,8 @@ def analizza_azienda(ticker: str):
           " concorrenza."
       ),
       contesto=f"{sintesi_dati}\nBull:\n{res_bull}",
-      max_t=450,
-      pausa=4,
+      max_t=900,
+      pausa=6,
   )
 
   # 4. Agente Macro
@@ -473,8 +459,8 @@ def analizza_azienda(ticker: str):
           f" {dati.get('sector')}."
       ),
       contesto=sintesi_dati,
-      max_t=400,
-      pausa=4,
+      max_t=900,
+      pausa=6,
   )
 
  # 5. Lead Portfolio Manager
@@ -499,16 +485,60 @@ SINTESI: [Spiegazione pratica per il cliente in 2 frasi complete]
   time.sleep(12)
   prompt_pm_completo = f"DATI:\n{quadro_pm}\n\n{prompt_pm}"
     
-  risp = client.chat.completions.create(
-        model=MODELLO,
-        messages=[
-            {"role": "system", "content": "Sei il Portfolio Manager. Rispondi unicamente con le tre righe richieste (VERDETTO, SCORE, SINTESI) senza preamboli."},
-            {"role": "user", "content": prompt_pm_completo}
-        ],
-        temperature=0.2,
-        max_tokens=400,
-        extra_body={"reasoning_format": "hidden"}
-    )
+  try:
+        risp = client.chat.completions.create(
+            model=MODELLO,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Sei il Portfolio Manager istituzionale. Rispondi SOLO con questo formato esatto:\n"
+                        "VERDETTO: [BUY / STRONG BUY / HOLD / SELL]\n"
+                        "SCORE: [un numero intero da 1 a 100]\n"
+                        "SINTESI: [2 frasi complete che riassumono il giudizio sul titolo]"
+                    ),
+                },
+                {"role": "user", "content": prompt_pm_completo},
+            ],
+            temperature=1,
+            max_completion_tokens=2048,
+        )
+
+        report_pm = risp.choices[0].message.content or ""
+        if "</think>" in report_pm:
+            report_pm = report_pm.split("</think>")[-1].strip()
+
+        print(f"\n[DEBUG RISPOSTA PM]:\n{report_pm}\n" + "-" * 30)
+
+        # Valori predefiniti di sicurezza
+        verdetto_val = "HOLD"
+        score_val = "50"
+        sintesi_pm = ""
+
+        for line in report_pm.splitlines():
+            # Rimuove eventuali asterischi markdown o spazi extra
+            line_clean = line.replace("*", "").strip()
+            line_upper = line_clean.upper()
+
+            if line_upper.startswith("VERDETTO:"):
+                verdetto_val = line_clean.split(":", 1)[1].strip()
+            elif line_upper.startswith("SCORE:"):
+                score_raw = line_clean.split(":", 1)[1].strip()
+                numeri = "".join(c for c in score_raw if c.isdigit())
+                score_val = numeri if numeri else "50"
+            elif line_upper.startswith("SINTESI:"):
+                sintesi_pm = line_clean.split(":", 1)[1].strip()
+
+        # Se la sintesi non è su una riga singola con etichetta, usa l'intero testo restituito
+        if not sintesi_pm and len(report_pm) > 10:
+            sintesi_pm = report_pm
+
+  except Exception as e:
+        print(f"[!] Errore Portfolio Manager: {e}")
+        verdetto_val = "Non determinato"
+        score_val = "N/D"
+        sintesi_pm = "Sintesi non disponibili."
+  
   report_pm = risp.choices[0].message.content or ""
   if "</think>" in report_pm:
         report_pm = report_pm.split("</think>")[-1].strip()
