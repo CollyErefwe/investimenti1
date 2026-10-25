@@ -231,28 +231,7 @@ def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict) -> str:
     return "\n".join(righe)
 
 
-def estrai_campi(testo: str) -> dict:
-    """Legge le righe CHIAVE: valore della risposta del responsabile del comitato.
-    Un campo può occupare più righe."""
-    testo = (testo or "").replace("**", "")
-    parti = re.split(r"^\s*(GIUDIZIO|SCORE|SINTESI|CAMBIA_IDEA)\s*:\s*", testo, flags=re.M | re.I)
-    return {parti[i].upper(): parti[i + 1].strip() for i in range(1, len(parti) - 1, 2)}
-
-
 # --------------------------------------------------------------------- HTML
-
-def classifica_giudizio(testo):
-    t = (testo or "").upper()
-    if "SFAV" in t:
-        return "Sfavorevole", "neg"
-    if "MOLTO FAV" in t:
-        return "Molto favorevole", "pos"
-    if "FAV" in t:
-        return "Favorevole", "pos"
-    if "NEUTR" in t:
-        return "Neutrale", "neu"
-    return "Non determinato", "nd"
-
 
 def testo_html(testo) -> str:
     """Testo del modello -> HTML sicuro (escape, elenchi puntati, grassetto)."""
@@ -342,7 +321,7 @@ def _grafico_prezzo(m) -> str:
 
 CSS = """
 :root{--ink:#17202b;--slate:#566273;--rule:#d6dbe2;--wash:#eef0f3;--accent:#1d4e6e;
---pos:#2b7a57;--neg:#a8412f;--neu:#8a6a14;
+--pos:#2b7a57;--neg:#a8412f;
 --serif:Georgia,"Times New Roman",serif;--sans:"Segoe UI","Helvetica Neue",Arial,sans-serif}
 *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{margin:0;padding:24px 12px;background:var(--wash);color:var(--ink);font:12.5px/1.55 var(--sans)}
@@ -354,19 +333,7 @@ h1{font:700 28px/1.15 var(--serif);margin:0}
 .data{text-align:right;color:var(--slate);font-size:11.5px;white-space:nowrap}
 h2{font:700 15px/1.3 var(--serif);margin:0 0 8px}
 section{margin-top:22px}
-.top{display:grid;grid-template-columns:1.55fr 1fr;gap:34px}
-.rating{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:6px}
-.parola{font:700 30px/1.1 var(--serif)}
-.pos{color:var(--pos)}.neg{color:var(--neg)}.neu{color:var(--neu)}.nd{color:var(--slate)}
-.score{white-space:nowrap;font-variant-numeric:tabular-nums}
-.score b{font:700 30px/1 var(--serif)}
-.score span{color:var(--slate);font-size:13px}
-.meter{height:4px;background:var(--rule);margin-bottom:12px}
-.meter i{display:block;height:100%}
-.f-pos{background:var(--pos)}.f-neg{background:var(--neg)}.f-neu{background:var(--neu)}.f-nd{background:var(--slate)}
-.sintesi{font-size:13px;line-height:1.6;margin:0 0 10px}
-.cambia{margin:0;color:var(--slate)}
-.cambia strong{color:var(--ink)}
+.nd{color:var(--slate)}
 .ladder{padding:24px 12px 0}
 .axis{position:relative}
 .lrow{margin-bottom:12px}
@@ -396,18 +363,13 @@ footer{margin-top:22px;border-top:1px solid var(--rule);padding-top:10px;color:v
 footer p{margin:0 0 4px}
 @page{size:A4;margin:11mm}
 @media print{body{background:#fff;padding:0}.page{border:0;max-width:none;padding:0}section{break-inside:avoid}}
-@media (max-width:640px){.top,.cols{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.data{text-align:left}}
+@media (max-width:640px){.cols{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.data{text-align:left}}
 """
 
 
 def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "") -> str:
-    """Report di una pagina (A4). `s` contiene giudizio, score, sintesi,
-    cambia_idea, bull, bear, contabile, macro."""
+    """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro."""
     esc = html.escape
-    parola, classe = classifica_giudizio(s.get("giudizio"))
-    score = s.get("score")
-    score_txt = str(score) if isinstance(score, int) else ND
-    larghezza = score if isinstance(score, int) else 0
 
     borsa = info.get("fullExchangeName") or info.get("exchange") or ""
     sigla = f"{borsa}: {ticker}" if borsa else ticker
@@ -434,20 +396,9 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
   <div class="data">Report del {time.strftime('%d/%m/%Y')}<br>Dati aggiornati alle {time.strftime('%H:%M')}</div>
 </header>
 
-<section class="top">
-  <div>
-    <div class="rating">
-      <div class="parola {classe}">{esc(parola)}</div>
-      <div class="score"><b>{esc(score_txt)}</b><span> / 100</span></div>
-    </div>
-    <div class="meter"><i class="f-{classe}" style="width:{larghezza}%"></i></div>
-    <p class="sintesi">{esc(s.get('sintesi') or 'Sintesi non disponibile.')}</p>
-    <p class="cambia"><strong>Cosa cambierebbe il giudizio.</strong> {esc(s.get('cambia_idea') or 'Non indicato.')}</p>
-  </div>
-  <div>
-    <h2>Prezzo e target</h2>
-    {_grafico_prezzo(m)}
-  </div>
+<section>
+  <h2>Prezzo e target</h2>
+  {_grafico_prezzo(m)}
 </section>
 
 <section class="cols">
@@ -493,11 +444,6 @@ if __name__ == "__main__":
     info.update(dati)
     m = calcola_metriche(info)
     sintesi = {
-        "giudizio": "FAVOREVOLE", "score": 78,
-        "sintesi": "Business molto redditizio e con poco debito rispetto alla cassa che genera. Il prezzo scontava già "
-                   "una crescita elevata: il rendimento da free cash flow è modesto e il margine di sicurezza è limitato.",
-        "cambia_idea": "Un calo dei volumi per più trimestri consecutivi o una norma che limiti le commissioni "
-                       "peggiorerebbe il giudizio; un ribasso del prezzo senza cambi nei fondamentali lo migliorerebbe.",
         "bull": "- **Crescita dei volumi**: i ricavi crescono del 9% su base annua con margine operativo del 66%.\n"
                 "- **Posizione di mercato**: la rete esistente rende costoso per i concorrenti entrare nel settore.",
         "bear": "- **Valutazione**: P/E atteso di 26,4x e rendimento da FCF di circa 3%, poco spazio per delusioni.\n"
