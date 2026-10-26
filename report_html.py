@@ -14,6 +14,7 @@ import base64
 import io
 
 from contextvars import ContextVar
+from datetime import date
 
 # Import per il grafico statico e il PDF
 import matplotlib.pyplot as plt
@@ -60,18 +61,35 @@ STR = {
                     "Linea blu continua: target medio. Linea nera punteggiata: prezzo attuale. "
                     "Linea arancione: media a 50 giorni. Linea viola: media a 200 giorni. "
                     "Prezzi da Yahoo Finance, fonte non ufficiale."),
-        # --- RSI ---
-        "rsi_titolo": "RSI (14) e divergenze",
-        "rsi_nd": "Storico insufficiente per calcolare l'RSI.",
+        # --- RSI (settimanale) ---
+        "rsi_titolo": "RSI settimanale (14) e divergenze",
+        "rsi_nd": "Storico insufficiente per calcolare l'RSI settimanale.",
         "rsi_ipercomprato": "Ipercomprato (70)",
-        "rsi_ipovenduto": "Ipowenduto (30)",
+        "rsi_ipovenduto": "Ipovenduto (30)",
         "rsi_div_rialzista": "Divergenza rialzista",
         "rsi_div_ribassista": "Divergenza ribassista",
         "rsi_nessuna_div": "Nessuna divergenza rilevata negli ultimi 2 anni.",
-        "rsi_nota": ("RSI a 14 periodi (metodo Wilder). Linee tratteggiate a 30 e 70. "
+        "rsi_nota": ("RSI a 14 periodi (metodo Wilder) calcolato sulle chiusure settimanali: "
+                     "ogni punto è una settimana, l'ultima è quella in corso. Linee a 30 e 70. "
                      "La divergenza è segnalata quando prezzo e RSI si muovono in direzioni opposte "
                      "tra due pivot consecutivi."),
-        "rsi_valore_attuale": "RSI attuale: {x}",
+        "rsi_valore_attuale": "RSI settimanale attuale: {x}",
+        # --- confronto con i concorrenti ---
+        "conf_titolo": "Confronto con i concorrenti",
+        "conf_nd": "Confronto con i concorrenti non disponibile: non sono stati trovati titoli comparabili.",
+        "conf_col_metrica": "Indicatore", "conf_col_verdetto": "Rispetto ai concorrenti",
+        "conf_fav": "Favorevole", "conf_con": "Sfavorevole", "conf_lin": "In linea",
+        "conf_h_fav": "Punti a favore", "conf_h_con": "Punti a sfavore",
+        "conf_nessuno": "Nessuno scostamento significativo rispetto ai concorrenti.",
+        "conf_frase": "{lab}: {v} contro una media di {ref} dei concorrenti ({det}).",
+        "conf_sintesi": "Su {n} indicatori confrontabili, {t} risulta favorevole in {f}, sfavorevole in {c} e in linea in {l}.",
+        "conf_sel_auto": "Concorrenti scelti tra le maggiori società dell&rsquo;industria per capitalizzazione, secondo Yahoo Finance: {l}.",
+        "conf_sel_man": "Concorrenti indicati dall&rsquo;utente: {l}.",
+        "conf_metodo": ("Per multipli e leva un valore più basso è favorevole; per margini, ROE, crescita, rendimento da FCF "
+                        "e potenziale sul target uno più alto. Lo scostamento è giudicato rispetto alla media dei concorrenti "
+                        "ed è significativo oltre il 10% per i multipli, da 1 a 3 punti percentuali per gli altri indicatori "
+                        "e mezzo anno di FCF per la leva. Confronto indicativo: valute e principi contabili possono differire "
+                        "e un multiplo basso non implica che il titolo sia sottovalutato."),
         "html_lang": "it", "titolo_report": "Report del comitato", "data_fmt": "%d/%m/%Y",
         "report_del": "Report del {d}", "dati_alle": "Dati aggiornati alle {t}",
         "settore_nd": "Settore non disponibile",
@@ -119,18 +137,35 @@ STR = {
                     "Solid blue line: mean target. Dotted black line: current price. "
                     "Orange line: 50-day average. Purple line: 200-day average. "
                     "Prices from Yahoo Finance, unofficial source."),
-        # --- RSI ---
-        "rsi_titolo": "RSI (14) and divergences",
-        "rsi_nd": "Not enough history to compute RSI.",
+        # --- RSI (weekly) ---
+        "rsi_titolo": "Weekly RSI (14) and divergences",
+        "rsi_nd": "Not enough history to compute the weekly RSI.",
         "rsi_ipercomprato": "Overbought (70)",
         "rsi_ipovenduto": "Oversold (30)",
         "rsi_div_rialzista": "Bullish divergence",
         "rsi_div_ribassista": "Bearish divergence",
         "rsi_nessuna_div": "No divergence detected over the last 2 years.",
-        "rsi_nota": ("14-period RSI (Wilder method). Dashed lines at 30 and 70. "
+        "rsi_nota": ("14-period RSI (Wilder method) computed on weekly closes: "
+                     "each point is one week, the last being the current week. Lines at 30 and 70. "
                      "A divergence is flagged when price and RSI move in opposite directions "
                      "between two consecutive pivots."),
-        "rsi_valore_attuale": "Current RSI: {x}",
+        "rsi_valore_attuale": "Current weekly RSI: {x}",
+        # --- peer comparison ---
+        "conf_titolo": "Peer comparison",
+        "conf_nd": "Peer comparison not available: no comparable stocks were found.",
+        "conf_col_metrica": "Indicator", "conf_col_verdetto": "Versus peers",
+        "conf_fav": "Favourable", "conf_con": "Unfavourable", "conf_lin": "In line",
+        "conf_h_fav": "Points in favour", "conf_h_con": "Points against",
+        "conf_nessuno": "No significant gap versus peers.",
+        "conf_frase": "{lab}: {v} versus a peer average of {ref} ({det}).",
+        "conf_sintesi": "Across {n} comparable indicators, {t} is favourable on {f}, unfavourable on {c} and in line on {l}.",
+        "conf_sel_auto": "Peers chosen among the largest companies in the industry by market cap, according to Yahoo Finance: {l}.",
+        "conf_sel_man": "Peers chosen by the user: {l}.",
+        "conf_metodo": ("For multiples and leverage a lower value is favourable; for margins, ROE, growth, FCF yield "
+                        "and upside to target a higher one. The gap is judged against the peer average "
+                        "and is significant beyond 10% for multiples, 1 to 3 percentage points for the other indicators "
+                        "and half a year of FCF for leverage. Indicative comparison: currencies and accounting standards may differ "
+                        "and a low multiple does not mean the stock is undervalued."),
         "html_lang": "en", "titolo_report": "Committee report", "data_fmt": "%d %b %Y",
         "report_del": "Report dated {d}", "dati_alle": "Data as of {t}",
         "settore_nd": "Sector not available",
@@ -403,35 +438,6 @@ _TV_CSS = """
 .tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
 .tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
-background:rgba(29,78,110,.10);border-top:1px solid rgba(29,78,110,.30);border-bottom:1px solid rgba(29,78,110,.30)}
-.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
-.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
-@media print{.tv{display:none}}
-</style>
-"""
-
-_TV_CSS = """
-<style>
-.tv-barra{display:flex;gap:6px;margin:0 0 8px}
-.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
-.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
-.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
-background:rgba(56, 132, 255, 0.08);border-top:1px solid rgba(56, 132, 255, 0.25);border-bottom:1px solid rgba(56, 132, 255, 0.25)}
-.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
-.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
-@media print{.tv{display:none}}
-</style>
-"""
-
-_TV_CSS = """
-<style>
-.tv-barra{display:flex;gap:6px;margin:0 0 8px}
-.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
-.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
-/* Sfondo della fascia ora in grigio leggerissimo */
-.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
 background:rgba(200, 200, 200, 0.1);border-top:1px solid rgba(200, 200, 200, 0.3);border-bottom:1px solid rgba(200, 200, 200, 0.3)}
 .tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
 .tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
@@ -439,20 +445,6 @@ background:rgba(200, 200, 200, 0.1);border-top:1px solid rgba(200, 200, 200, 0.3
 </style>
 """
 
-_TV_CSS = """
-<style>
-.tv-barra{display:flex;gap:6px;margin:0 0 8px}
-.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
-.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
-.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
-background:rgba(29,78,110,.10);border-top:1px solid rgba(29,78,110,.30);border-bottom:1px solid rgba(29,78,110,.30)}
-.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
-.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
-@media print{.tv{display:none}}
-</style>
-"""
- 
 _TV_JS = """
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -490,7 +482,7 @@ _TV_JS = """
     }
   });
   cs.setData(D.candele);
- 
+
   function media(dati, colore) {
     if (!dati.length) return;
     var s = chart.addLineSeries({color: colore, lineWidth: 1, lastValueVisible: false,
@@ -499,25 +491,31 @@ _TV_JS = """
   }
   media(D.sma50, '#d9a94f');
   media(D.sma200, '#9482b8');
- 
-  // Livelli: linee sottili e chiare. Il colore dell'etichetta sull'asse è
-  // indipendente da quello della linea (axisLabelColor / axisLabelTextColor).
-  var STILE_ESTREMI = {linea: '#b9c4d1', stile: 2, etichetta: '#e9eef3', testo: '#475569'};   // tratteggiata
-  var STILE_MEDIO   = {linea: '#8fa1b5', stile: 0, etichetta: '#dde4ec', testo: '#334155'};   // continua
-  var STILE_PREZZO  = {linea: '#64748b', stile: 1, etichetta: '#64748b', testo: '#ffffff'};   // punteggiata
- 
-  function livello(prezzo, titolo, o) {
+
+  function linea(prezzo, titolo, coloreLinea, coloreSfondo, coloreTesto, spessore) {
     if (prezzo === null) return;
     cs.createPriceLine({
-      price: prezzo, title: titolo, color: o.linea, lineWidth: 1, lineStyle: o.stile,
-      axisLabelVisible: true, axisLabelColor: o.etichetta, axisLabelTextColor: o.testo
+      price: prezzo, 
+      title: titolo, 
+      color: coloreLinea, 
+      lineWidth: spessore, 
+      lineStyle: 0, // 0 = linea continua
+      axisLabelVisible: true, 
+      axisLabelColor: coloreSfondo, 
+      axisLabelTextColor: coloreTesto
     });
   }
-  livello(L.tmax, D.et.tmax, STILE_ESTREMI);
-  livello(L.tmin, D.et.tmin, STILE_ESTREMI);
-  livello(L.target, D.et.target, STILE_MEDIO);
-  livello(L.prezzo, D.et.prezzo, STILE_PREZZO);
- 
+  
+  // I target usano un grigio chiaro continuo. Il prezzo usa un nero.
+  var STILE_ESTREMI = {linea: '#94a3b8', sfondo: '#e2e8f0', testo: '#475569'};
+  var STILE_MEDIO   = {linea: '#94a3b8', sfondo: '#e2e8f0', testo: '#475569'};
+  var STILE_PREZZO  = {linea: '#17202b', sfondo: '#17202b', testo: '#ffffff'};
+
+  linea(L.tmax, D.et.tmax, STILE_ESTREMI.linea, STILE_ESTREMI.sfondo, STILE_ESTREMI.testo, 1);
+  linea(L.tmin, D.et.tmin, STILE_ESTREMI.linea, STILE_ESTREMI.sfondo, STILE_ESTREMI.testo, 1);
+  linea(L.target, D.et.target, STILE_MEDIO.linea, STILE_MEDIO.sfondo, STILE_MEDIO.testo, 2);
+  linea(L.prezzo, D.et.prezzo, STILE_PREZZO.linea, STILE_PREZZO.sfondo, STILE_PREZZO.testo, 1);
+
   function intervallo(giorni) {
     var ts = chart.timeScale();
     if (!giorni) { ts.fitContent(); return; }
@@ -536,15 +534,15 @@ _TV_JS = """
     });
   });
   intervallo(365);
- 
+
   function adatta() { chart.applyOptions({width: box.clientWidth}); }
   if (typeof ResizeObserver !== 'undefined') { new ResizeObserver(adatta).observe(box); }
   window.addEventListener('resize', adatta);
 })();
 </script>
 """
- 
- 
+
+
 def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
     """Sezione HTML con il grafico (Lightweight Charts di TradingView) per
     l'uso a schermo. `storico` è una lista di dict con time (AAAA-MM-GG),
@@ -557,15 +555,15 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
             f'<section class="tv"><h2>{_t("tv_titolo")}</h2>'
             f'<p class="nd">{_t("tv_nd")}</p></section>'
         )
- 
+
     v = m["valuta"]
     chiusure = [r["close"] for r in storico]
     s50 = _media_mobile(chiusure, 50)
     s200 = _media_mobile(chiusure, 200)
- 
+
     def serie(ms):
         return [{"time": r["time"], "value": round(x, 4)} for r, x in zip(storico, ms) if x is not None]
- 
+
     prezzo = m["prezzo"] if m["prezzo"] is not None else chiusure[-1]
     et = {
         "prezzo": _t("tv_prezzo").format(x=_it(prezzo)),
@@ -587,7 +585,7 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
         "msg": _t("tv_offline"),
     }
     dati_js = json.dumps(dati).replace("</", "<\\/")
- 
+
     fatti = []
     if s50[-1]:
         fatti.append(f"{_t('tv_f50')} <b>{_it(s50[-1])}</b> ({_t('tv_fprezzo')} {fmt_pct(prezzo / s50[-1] - 1, segno=True)})")
@@ -600,9 +598,9 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
     if m["min52"]:
         fatti.append(f"{_t('tv_fmin')} <b>{fmt_pct(prezzo / m['min52'] - 1, segno=True)}</b>")
     righe_fatti = "".join(f"<span>{f}</span>" for f in fatti)
- 
+
     nota = html.escape(_t("tv_nota").format(v=v))
- 
+
     return (
         '<section class="tv">' + _TV_CSS
         + f"<h2>{_t('tv_titolo')}</h2>"
@@ -614,134 +612,7 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
         + _TV_JS.replace("__DATI__", dati_js)
         + "</section>"
     )
- 
- 
-# --------------------------------------------- RSI e divergenze
 
-def grafico_rsi(storico, lang: str = None) -> str:
-    _imposta(lang)
-    if not storico or len(storico) < 30:
-        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
-                f'<p class="nd">{_t("rsi_nd")}</p></section>')
-
-    chiusure = [r["close"] for r in storico]
-    rsi = _rsi(chiusure, 14)
-    divergenze = _trova_divergenze(chiusure, rsi)
-
-    W, H = 760, 150
-    pad_l, pad_r, pad_t, pad_b = 35, 10, 8, 18
-    plot_w = W - pad_l - pad_r
-    plot_h = H - pad_t - pad_b
-    n = len(rsi)
-    validi = [(i, v) for i, v in enumerate(rsi) if v is not None]
-    if not validi:
-        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
-                f'<p class="nd">{_t("rsi_nd")}</p></section>')
-    i_primo = validi[0][0]
-
-    def x(i):
-        return pad_l + (i - i_primo) / max(1, n - 1 - i_primo) * plot_w
-
-    def y(v):
-        return pad_t + (1 - v / 100.0) * plot_h
-
-    # Polilinea RSI
-    punti = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in validi)
-
-    # Aree colorate (molto tenui)
-    path_top = (
-        f"M{x(i_primo):.1f},{y(100):.1f} "
-        f"L{x(i_primo):.1f},{y(70):.1f} "
-        + " ".join(f"L{x(i):.1f},{y(min(v, 70)):.1f}" for i, v in validi)
-        + f" L{x(n - 1):.1f},{y(100):.1f} Z"
-    )
-    path_bot = (
-        f"M{x(i_primo):.1f},{y(0):.1f} "
-        f"L{x(i_primo):.1f},{y(30):.1f} "
-        + " ".join(f"L{x(i):.1f},{y(max(v, 30)):.1f}" for i, v in validi)
-        + f" L{x(n - 1):.1f},{y(0):.1f} Z"
-    )
-
-    # Linee di divergenza
-    linee_div = []
-    for d in divergenze:
-        colore = "#2b7a57" if d["tipo"] == "rialzista" else "#a8412f"
-        x1, y1 = x(d["i1"]), y(rsi[d["i1"]])
-        x2, y2 = x(d["i2"]), y(rsi[d["i2"]])
-        linee_div.append(
-            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-            f'stroke="{colore}" stroke-width="2" stroke-dasharray="4,3" opacity="0.9"/>'
-        )
-        linee_div.append(
-            f'<circle cx="{x1:.1f}" cy="{y1:.1f}" r="3" fill="{colore}"/>'
-            f'<circle cx="{x2:.1f}" cy="{y2:.1f}" r="3" fill="{colore}"/>'
-        )
-
-    # Etichette asse Y e linee 30/50/70 (molto chiare)
-    etichette = ""
-    
-    # Linea 50 (continua, grigio chiarissimo)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(50):.1f}" x2="{W - pad_r}" y2="{y(50):.1f}" '
-        f'stroke="#f1f5f9" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(50) + 4:.1f}" text-anchor="end" '
-        f'font-size="10" font-weight="normal" fill="#cbd5e1">50</text>'
-    )
-    
-    # Linea 70 (continua, grigio chiaro)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(70):.1f}" x2="{W - pad_r}" y2="{y(70):.1f}" '
-        f'stroke="#e2e8f0" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(70) + 4:.1f}" text-anchor="end" '
-        f'font-size="11" font-weight="normal" fill="#94a3b8">70</text>'
-    )
-    
-    # Linea 30 (continua, grigio chiaro)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(30):.1f}" x2="{W - pad_r}" y2="{y(30):.1f}" '
-        f'stroke="#e2e8f0" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(30) + 4:.1f}" text-anchor="end" '
-        f'font-size="11" font-weight="normal" fill="#94a3b8">30</text>'
-    )
-
-    valore_attuale = rsi[-1] if rsi[-1] is not None else None
-    etichetta_attuale = (
-        _t("rsi_valore_attuale").format(x=f"{valore_attuale:.1f}")
-        if valore_attuale is not None else ""
-    )
-
-    # Legenda divergenze
-    legenda = []
-    ha_rialz = any(d["tipo"] == "rialzista" for d in divergenze)
-    ha_ribass = any(d["tipo"] == "ribassista" for d in divergenze)
-    if ha_rialz:
-        legenda.append(f'<span><span class="dot v"></span>{_t("rsi_div_rialzista")}</span>')
-    if ha_ribass:
-        legenda.append(f'<span><span class="dot r"></span>{_t("rsi_div_ribassista")}</span>')
-    if not legenda:
-        legenda.append(f'<span>{_t("rsi_nessuna_div")}</span>')
-
-    return (
-        '<section class="rsi">' + _RSI_CSS
-        + f"<h2>{_t('rsi_titolo')}</h2>"
-        + '<div class="rsi-box">'
-        + '<div class="rsi-head">'
-        + f'<h3>{_t("rsi_ipercomprato")} / {_t("rsi_ipovenduto")}</h3>'
-        + f'<div class="cur"><b>{etichetta_attuale}</b></div>'
-        + '</div>'
-        + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
-          f'xmlns="http://www.w3.org/2000/svg">'
-        + f'<path d="{path_top}" fill="#ef4444" opacity="0.05"/>'
-        + f'<path d="{path_bot}" fill="#22c55e" opacity="0.05"/>'
-        + etichette
-        + f'<polyline points="{punti}" fill="none" stroke="#1d4e6e" stroke-width="1.8"/>'
-        + "".join(linee_div)
-        + '</svg>'
-        + f'<div class="rsi-legenda">{"".join(legenda)}</div>'
-        + f'<p class="nota">{html.escape(_t("rsi_nota"))}</p>'
-        + '</div>'
-        + '</section>'
-    )
 
 # --------------------------------------------- RSI e divergenze
 
@@ -773,6 +644,16 @@ def _rsi(chiusure, periodo=14):
         media_p = (media_p * (periodo - 1) + perdite[i - 1]) / periodo
         out[i] = _valore(media_g, media_p)
     return out
+
+
+def _chiusure_settimanali(storico):
+    """Un punto per settimana ISO: l'ultima candela giornaliera disponibile.
+    L'ultima settimana, se in corso, usa l'ultima chiusura finora."""
+    sett = {}
+    for r in storico:
+        anno, settimana, _ = date.fromisoformat(r["time"]).isocalendar()
+        sett[(anno, settimana)] = r
+    return list(sett.values())
 
 
 def _pivot_locali(serie, finestra=5):
@@ -847,16 +728,23 @@ vertical-align:middle}
 
 
 def grafico_rsi(storico, lang: str = None) -> str:
-    """Grafico RSI a 14 periodi in SVG (funziona anche nel PDF), con
-    evidenziazione delle divergenze rialziste/ribassiste rilevate."""
+    """Grafico RSI settimanale a 14 periodi in SVG (funziona anche nel PDF),
+    con evidenziazione delle divergenze rialziste/ribassiste rilevate.
+    Lo storico giornaliero viene ridotto a una chiusura per settimana."""
     _imposta(lang)
-    if not storico or len(storico) < 30:
-        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
-                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+    nd_html = (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
+               f'<p class="nd">{_t("rsi_nd")}</p></section>')
 
-    chiusure = [r["close"] for r in storico]
+    if not storico or len(storico) < 30:
+        return nd_html
+
+    settimanale = _chiusure_settimanali(storico)
+    if len(settimanale) < 30:
+        return nd_html
+
+    chiusure = [r["close"] for r in settimanale]
     rsi = _rsi(chiusure, 14)
-    divergenze = _trova_divergenze(chiusure, rsi)
+    divergenze = _trova_divergenze(chiusure, rsi, finestra=3)
 
     W, H = 760, 150
     pad_l, pad_r, pad_t, pad_b = 35, 10, 8, 18
@@ -865,8 +753,7 @@ def grafico_rsi(storico, lang: str = None) -> str:
     n = len(rsi)
     validi = [(i, v) for i, v in enumerate(rsi) if v is not None]
     if not validi:
-        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
-                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+        return nd_html
     i_primo = validi[0][0]
 
     def x(i):
@@ -878,20 +765,6 @@ def grafico_rsi(storico, lang: str = None) -> str:
     # Polilinea RSI
     punti = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in validi)
 
-    # Aree colorate (molto tenui)
-    path_top = (
-        f"M{x(i_primo):.1f},{y(100):.1f} "
-        f"L{x(i_primo):.1f},{y(70):.1f} "
-        + " ".join(f"L{x(i):.1f},{y(min(v, 70)):.1f}" for i, v in validi)
-        + f" L{x(n - 1):.1f},{y(100):.1f} Z"
-    )
-    path_bot = (
-        f"M{x(i_primo):.1f},{y(0):.1f} "
-        f"L{x(i_primo):.1f},{y(30):.1f} "
-        + " ".join(f"L{x(i):.1f},{y(max(v, 30)):.1f}" for i, v in validi)
-        + f" L{x(n - 1):.1f},{y(0):.1f} Z"
-    )
-
     # Linee di divergenza
     linee_div = []
     for d in divergenze:
@@ -900,24 +773,24 @@ def grafico_rsi(storico, lang: str = None) -> str:
         x2, y2 = x(d["i2"]), y(rsi[d["i2"]])
         linee_div.append(
             f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-            f'stroke="{colore}" stroke-width="2" stroke-dasharray="4,3" opacity="0.9"/>'
+            f'stroke="{colore}" stroke-width="2" opacity="0.9"/>'
         )
         linee_div.append(
             f'<circle cx="{x1:.1f}" cy="{y1:.1f}" r="3" fill="{colore}"/>'
             f'<circle cx="{x2:.1f}" cy="{y2:.1f}" r="3" fill="{colore}"/>'
         )
 
-    # Etichette asse Y e linee 30/50/70
+    # Etichette asse Y e linee 30/50/70 (tutte continue)
     etichette = ""
-    
-    # Linea 50 (continua, grigio chiaro, sottilissima)
+
+    # Linea 50 (continua, grigio chiarissimo)
     etichette += (
         f'<line x1="{pad_l}" y1="{y(50):.1f}" x2="{W - pad_r}" y2="{y(50):.1f}" '
         f'stroke="#e2e8f0" stroke-width="1"/>'
         f'<text x="{pad_l - 6}" y="{y(50) + 4:.1f}" text-anchor="end" '
         f'font-size="10" font-weight="normal" fill="#94a3b8">50</text>'
     )
-    
+
     # Linea 70 (continua, grigio chiaro)
     etichette += (
         f'<line x1="{pad_l}" y1="{y(70):.1f}" x2="{W - pad_r}" y2="{y(70):.1f}" '
@@ -925,7 +798,7 @@ def grafico_rsi(storico, lang: str = None) -> str:
         f'<text x="{pad_l - 6}" y="{y(70) + 4:.1f}" text-anchor="end" '
         f'font-size="11" font-weight="normal" fill="#64748b">70</text>'
     )
-    
+
     # Linea 30 (continua, grigio chiaro)
     etichette += (
         f'<line x1="{pad_l}" y1="{y(30):.1f}" x2="{W - pad_r}" y2="{y(30):.1f}" '
@@ -961,8 +834,6 @@ def grafico_rsi(storico, lang: str = None) -> str:
         + '</div>'
         + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
           f'xmlns="http://www.w3.org/2000/svg">'
-        + f'<path d="{path_top}" fill="#ef4444" opacity="0.05"/>'
-        + f'<path d="{path_bot}" fill="#22c55e" opacity="0.05"/>'
         + etichette
         + f'<polyline points="{punti}" fill="none" stroke="#1d4e6e" stroke-width="1.8"/>'
         + "".join(linee_div)
@@ -1060,6 +931,182 @@ def _grafico_prezzo(m) -> str:
     return f'<div class="ladder"><div class="axis">{linea}{"".join(righe)}</div>{nota}</div>'
 
 
+# ------------------------------------------- confronto con i concorrenti
+
+def _pos(x):
+    """Solo valori positivi (un multiplo negativo non è confrontabile)."""
+    return x if x is not None and x > 0 else None
+
+
+def _lev(m):
+    """Debito netto / FCF in anni come numero confrontabile: 0 se cassa netta,
+    None se non calcolabile."""
+    dn = m["debito_netto"]
+    if dn is None:
+        return None
+    if dn <= 0:
+        return 0.0
+    if m["fcf"] is None or m["fcf"] <= 0:
+        return None
+    return m["debito_netto_su_fcf"]
+
+
+def _fmt_lev(x):
+    return _t("cassa_netta") if x <= 0 else f"{_it(x, 1)} {_t('anni_fcf')}"
+
+
+# (chiave testo, valore, formato, direzione, soglia, modo)
+# direzione: +1 = più alto è meglio, -1 = più basso è meglio.
+# modo "rel": soglia come scostamento relativo; "abs": scostamento assoluto.
+_CONF = [
+    ("pe_fwd", lambda m: _pos(m["pe_fwd"]), fmt_x, -1, 0.10, "rel"),
+    ("ev_ebitda", lambda m: _pos(m["ev_ebitda"]), fmt_x, -1, 0.10, "rel"),
+    ("fcf_yield", lambda m: m["fcf_yield"], fmt_pct, 1, 0.01, "abs"),
+    ("margine_op", lambda m: m["margine_op"], fmt_pct, 1, 0.03, "abs"),
+    ("margine_netto", lambda m: m["margine_netto"], fmt_pct, 1, 0.03, "abs"),
+    ("roe", lambda m: m["roe"], fmt_pct, 1, 0.03, "abs"),
+    ("crescita", lambda m: m["crescita_ricavi"], lambda x: fmt_pct(x, segno=True), 1, 0.02, "abs"),
+    ("dn_fcf", _lev, _fmt_lev, -1, 0.5, "abs"),
+    ("upside", lambda m: m["upside"], lambda x: fmt_pct(x, segno=True), 1, 0.03, "abs"),
+]
+
+
+def _cella_conf(chiave, fmt, valore, m_az):
+    if chiave == "dn_fcf":
+        return _ratio_debito(m_az)
+    return _nd() if valore is None else fmt(valore)
+
+
+def _analisi_confronto(m, concorrenti):
+    """Confronta il titolo con la media dei concorrenti, indicatore per
+    indicatore. Tutto è calcolato dal codice. Restituisce le righe della
+    tabella, i principali punti a favore e contro e i conteggi."""
+    tutti = [m] + [c["m"] for c in concorrenti]
+    righe, fav, con = [], [], []
+    conteggi = {"fav": 0, "con": 0, "lin": 0}
+    for chiave, val, fmt, direz, soglia, modo in _CONF:
+        valori = [val(x) for x in tutti]
+        classi = [""] * len(tutti)
+
+        # Miglior e peggior valore, evidenziati solo se la distanza è significativa.
+        presenti = [(direz * x, i) for i, x in enumerate(valori) if x is not None]
+        if len(presenti) >= 2:
+            grezzi = [x for x in valori if x is not None]
+            distanza = max(grezzi) - min(grezzi)
+            if modo == "rel":
+                media = sum(grezzi) / len(grezzi)
+                distanza = distanza / abs(media) if media else 0.0
+            migliore = max(p for p, _ in presenti)
+            peggiore = min(p for p, _ in presenti)
+            if distanza >= soglia and migliore != peggiore:
+                for p, i in presenti:
+                    if p == migliore:
+                        classi[i] = "best"
+                    elif p == peggiore:
+                        classi[i] = "worst"
+
+        testi = [_cella_conf(chiave, fmt, v, x) for v, x in zip(valori, tutti)]
+
+        # Giudizio rispetto alla media dei concorrenti.
+        esito = None
+        altri = [x for x in valori[1:] if x is not None]
+        if valori[0] is not None and altri:
+            ref = sum(altri) / len(altri)
+            scarto = valori[0] - ref
+            if modo == "rel":
+                scarto = scarto / abs(ref) if ref else 0.0
+            punteggio = direz * scarto / soglia
+            if punteggio >= 1:
+                esito = "fav"
+                fav.append((punteggio, chiave, testi, fmt(ref)))
+            elif punteggio <= -1:
+                esito = "con"
+                con.append((-punteggio, chiave, testi, fmt(ref)))
+            else:
+                esito = "lin"
+            conteggi[esito] += 1
+        righe.append((_t(chiave), list(zip(testi, classi)), esito))
+
+    fav.sort(key=lambda r: r[0], reverse=True)
+    con.sort(key=lambda r: r[0], reverse=True)
+    return righe, fav[:3], con[:3], conteggi
+
+
+_VERDETTO = {
+    "fav": ("v-fav", "&#9650;", "conf_fav"),
+    "con": ("v-con", "&#9660;", "conf_con"),
+    "lin": ("v-lin", "=", "conf_lin"),
+}
+
+
+def sezione_confronto(ticker: str, nome: str, m: dict, concorrenti: list,
+                      lang: str = None, manuale: bool = False) -> str:
+    """Sezione HTML di confronto con i concorrenti. `concorrenti` è una lista
+    di dict {ticker, nome, m} dove m sono le metriche di calcola_metriche."""
+    _imposta(lang)
+    esc = html.escape
+    titolo = f"<h2>{_t('conf_titolo')}</h2>"
+    vuoto = f'<section class="conf">{titolo}<p class="nd">{_t("conf_nd")}</p></section>'
+    if not concorrenti:
+        return vuoto
+
+    righe, fav, con, cnt = _analisi_confronto(m, concorrenti)
+    totale = sum(cnt.values())
+    if totale == 0:
+        return vuoto
+
+    intestazione = (
+        f'<th>{esc(_t("conf_col_metrica"))}</th>'
+        f'<th class="sel" title="{esc(nome, quote=True)}">{esc(ticker)}</th>'
+        + "".join(f'<th title="{esc(c["nome"], quote=True)}">{esc(c["ticker"])}</th>' for c in concorrenti)
+        + f'<th>{esc(_t("conf_col_verdetto"))}</th>'
+    )
+
+    celle_mcap = "".join(
+        "<td{}>{}</td>".format(' class="sel"' if k == 0 else "", esc(fmt_grande(x["mcap"], x["valuta"])))
+        for k, x in enumerate([m] + [c["m"] for c in concorrenti])
+    )
+    corpo = [f'<tr><td>{esc(_t("mcap"))}</td>{celle_mcap}<td class="v-lin"></td></tr>']
+    for etichetta, celle, esito in righe:
+        tds = ""
+        for k, (testo, cl) in enumerate(celle):
+            classi = " ".join(x for x in ("sel" if k == 0 else "", cl) if x)
+            attr = f' class="{classi}"' if classi else ""
+            tds += f"<td{attr}>{esc(testo)}</td>"
+        if esito:
+            cl, glifo, chiave = _VERDETTO[esito]
+            verdetto = f'<td class="{cl}">{glifo} {esc(_t(chiave))}</td>'
+        else:
+            verdetto = f'<td class="v-lin">{esc(_nd())}</td>'
+        corpo.append(f"<tr><td>{esc(etichetta)}</td>{tds}{verdetto}</tr>")
+
+    def frasi(voci):
+        if not voci:
+            return f'<p class="nd">{_t("conf_nessuno")}</p>'
+        out = []
+        for _, chiave, testi, ref in voci:
+            dettaglio = ", ".join(f"{c['ticker']} {t}" for c, t in zip(concorrenti, testi[1:]))
+            out.append(_t("conf_frase").format(lab=_t(chiave), v=testi[0], ref=ref, det=dettaglio))
+        return "<ul>" + "".join(f"<li>{esc(f)}</li>" for f in out) + "</ul>"
+
+    sintesi = _t("conf_sintesi").format(n=totale, t=ticker, f=cnt["fav"], c=cnt["con"], l=cnt["lin"])
+    elenco = ", ".join(f"{c['ticker']} ({c['nome']})" for c in concorrenti)
+    selezione = _t("conf_sel_man" if manuale else "conf_sel_auto").format(l=esc(elenco))
+
+    return (
+        f'<section class="conf">{titolo}'
+        f'<p class="conf-sint">{esc(sintesi)}</p>'
+        f'<div class="cmp-wrap"><table class="cmp"><thead><tr>{intestazione}</tr></thead>'
+        f'<tbody>{"".join(corpo)}</tbody></table></div>'
+        '<div class="cols conf-cols">'
+        f'<div class="tesi bull"><h2>{_t("conf_h_fav")}</h2><div class="testo">{frasi(fav)}</div></div>'
+        f'<div class="tesi bear"><h2>{_t("conf_h_con")}</h2><div class="testo">{frasi(con)}</div></div>'
+        "</div>"
+        f'<p class="nota">{selezione} {_t("conf_metodo")}</p>'
+        "</section>"
+    )
+
+
 CSS = """
 :root{--ink:#17202b;--slate:#566273;--rule:#d6dbe2;--wash:#eef0f3;--accent:#1d4e6e;
 --pos:#2b7a57;--neg:#a8412f;
@@ -1108,6 +1155,20 @@ footer{margin-top:26px;border-top:2px solid var(--ink);padding-top:12px;color:va
 footer h3{font:700 9.5px/1.3 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--ink);margin:0 0 5px}
 footer p{margin:0 0 4px}
 .foot-note{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
+.conf-sint{margin:0 0 10px;color:var(--slate)}
+.cmp-wrap{overflow-x:auto}
+table.cmp{width:100%;border-collapse:collapse;font-size:11.5px}
+.cmp th,.cmp td{padding:5px 8px;border-bottom:1px solid var(--rule);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cmp th:first-child,.cmp td:first-child{text-align:left;padding-left:0;color:var(--slate);font-weight:400;white-space:normal}
+.cmp thead th{font:700 10px/1.3 var(--sans);letter-spacing:.07em;text-transform:uppercase;color:var(--ink);border-bottom:2px solid var(--ink)}
+.cmp td.sel,.cmp th.sel{background:#f1f5f9;font-weight:700;color:var(--ink)}
+.cmp td.best{color:var(--pos);font-weight:700}
+.cmp td.worst{color:var(--neg);font-weight:700}
+.cmp td.v-fav{color:var(--pos);font-weight:600}
+.cmp td.v-con{color:var(--neg);font-weight:600}
+.cmp td.v-lin{color:var(--slate)}
+.cmp tr:last-child td{border-bottom:0}
+.conf-cols{margin-top:16px}
 @page{size:A4;margin:11mm}
 @media print{body{background:#fff;padding:0}.page{border:0;max-width:none;padding:0}section,footer{break-inside:avoid}}
 @media (max-width:640px){.cols,.foot{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.data{text-align:left}}
@@ -1120,31 +1181,31 @@ def genera_grafico_statico_png(storico: list, m: dict) -> str:
     """Genera un grafico a candele statico in base64 per il PDF."""
     if not storico or len(storico) < 20:
         return ""
-    
+
     df = pd.DataFrame(storico)
     df['time'] = pd.to_datetime(df['time'])
-    
+
     fig, ax = plt.subplots(figsize=(8, 3.2))  # Formato perfetto per A4
-    
+
     up = df[df.close >= df.open]
     down = df[df.close < df.open]
-    
+
     # Candele verdi
     col1 = '#2b7a57'
     ax.vlines(up.time, up.low, up.high, color=col1, linewidth=1)
     ax.bar(up.time, up.close - up.open, bottom=up.open, color=col1, width=1.0, align='center')
-    
+
     # Candele rosse
     col2 = '#a8412f'
     ax.vlines(down.time, down.low, down.high, color=col2, linewidth=1)
     ax.bar(down.time, down.close - down.open, bottom=down.open, color=col2, width=1.0, align='center')
-    
+
     # Linee target e prezzo
     if m.get('target'):
-        ax.axhline(m['target'], color='#1d4e6e', linestyle='-', linewidth=1.5, label='Target Medio')
+        ax.axhline(m['target'], color='#94a3b8', linestyle='-', linewidth=1.5, label='Target Medio')
     if m.get('prezzo'):
-        ax.axhline(m['prezzo'], color='#17202b', linestyle='--', linewidth=1, label='Prezzo Attuale')
-        
+        ax.axhline(m['prezzo'], color='#17202b', linestyle='-', linewidth=1, label='Prezzo Attuale')
+
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['left'].set_color('#d6dbe2')
@@ -1154,12 +1215,12 @@ def genera_grafico_statico_png(storico: list, m: dict) -> str:
     ax.set_facecolor('#ffffff')
     fig.patch.set_facecolor('#ffffff')
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
-    
+
     buf = io.BytesIO()
     plt.tight_layout()
     plt.savefig(buf, format='png', dpi=150)
     plt.close(fig)
-    
+
     buf.seek(0)
     img_b64 = base64.b64encode(buf.read()).decode('utf-8')
     return f"data:image/png;base64,{img_b64}"
@@ -1168,18 +1229,17 @@ def genera_grafico_statico_png(storico: list, m: dict) -> str:
 def genera_pdf_da_html(html_content: str) -> bytes:
     """Converte l'HTML in PDF usando Playwright (Chromium invisibile)."""
     from playwright.sync_api import sync_playwright
-    import time
-    
+
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
-        
+
         # Carica il codice HTML
         page.set_content(html_content, wait_until="networkidle")
-        
+
         # Aspetta un attimo per sicurezza (es. per le immagini base64)
         time.sleep(0.5)
-        
+
         # Genera il PDF (formato A4)
         pdf_bytes = page.pdf(
             format="A4",
@@ -1191,9 +1251,9 @@ def genera_pdf_da_html(html_content: str) -> bytes:
 
 # -------------------------------------------------------
 
-def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", 
+def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "",
                   grafico: str = "", grafico_statico: str = "", adatta_iframe: bool = False,
-                  lang: str = None, logo: str = "") -> str:
+                  lang: str = None, logo: str = "", confronto: str = "") -> str:
     """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro.
     `grafico` è HTML facoltativo inserito sotto 'Prezzo e target' (solo schermo).
     `grafico_statico` è un'immagine base64 per il PDF.
@@ -1218,9 +1278,14 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
         f'<img class="logo" src="{esc(logo, quote=True)}" alt="">' if logo
         else f'<div class="mono">{esc(iniziali)}</div>'
     )
-    
-    # Usa il grafico statico se presente (per il PDF), altrimenti quello interattivo
-    blocco_grafico = f'<img src="{grafico_statico}" style="width:100%; height:auto; border:1px solid var(--rule); border-radius:4px; margin-top:10px;" alt="Grafico">' if grafico_statico else grafico
+
+    # Usa il grafico statico se presente (per il PDF), altrimenti quello interattivo.
+    # Il grafico RSI settimanale (SVG) viene sempre mostrato sotto.
+    blocco_grafico = (
+        f'<img src="{grafico_statico}" style="width:100%; height:auto; border:1px solid var(--rule); border-radius:4px; margin-top:10px;" alt="Grafico">'
+        + grafico
+        if grafico_statico else grafico
+    )
 
     # Solo per la vista a schermo: la finestra si adatta all'altezza del report.
     script_altezza = (
@@ -1270,6 +1335,8 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
   <div><h2>{_t('h_valutazione')}</h2>{_tabella(righe_valutazione(m))}</div>
 </section>
 
+{confronto}
+
 <section class="cols">
   <div><h2>{_t('h_contabile')}</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
   <div><h2>{_t('h_macro')}</h2><div class="testo">{testo_html(s.get('macro'))}</div></div>
@@ -1297,7 +1364,7 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
 """
 
 
-def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", grafico: str = "", lang: str = None, logo: str = "") -> str:
+def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", grafico: str = "", lang: str = None, logo: str = "", confronto: str = "") -> str:
     """Genera solo il frammento HTML del report (senza <html>, <head>, <body>)
     per essere visualizzato in un iframe di Streamlit."""
     _imposta(lang)
@@ -1352,6 +1419,8 @@ def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict
   <div><h2>{_t('h_qualita')}</h2>{_tabella(righe_qualita(m))}</div>
   <div><h2>{_t('h_valutazione')}</h2>{_tabella(righe_valutazione(m))}</div>
 </section>
+
+{confronto}
 
 <section class="cols">
   <div><h2>{_t('h_contabile')}</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
