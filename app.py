@@ -31,11 +31,8 @@ from report_html import (
 
 st.set_page_config(page_title="Analisi azionaria · Equity analysis", page_icon="📈", layout="wide")
 
-# Logo aziendale (facoltativo). Lasciato vuoto non si chiama nessun servizio
-# esterno e nel report compare un monogramma con le iniziali dell'azienda.
-# Per attivarlo indica un indirizzo con {domain}, per esempio:
-#   LOGO_URL = "https://servizio-loghi.example/{domain}"
-LOGO_URL = ""
+# Logo aziendale (Valore Capital)
+LOGO_URL = "https://i.ibb.co/7xvc9R2t/Logo-Valore-Capital.png"
 
 # Numero di concorrenti messi a confronto con il titolo analizzato.
 N_CONCORRENTI = 2
@@ -326,27 +323,6 @@ def scarica_concorrenti(ticker: str, info: dict, manuali: list, lang: str, n: in
     return trovati[:n], bool(manuale)
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def scarica_logo(sito: str) -> str:
-    """Logo come data-URI (così resta nel file scaricato), oppure '' se
-    LOGO_URL non è impostato o il download non riesce."""
-    if not LOGO_URL or not sito:
-        return ""
-    dominio = urlparse(sito if "//" in sito else "//" + sito).netloc.lower().removeprefix("www.")
-    if not dominio:
-        return ""
-    try:
-        richiesta = urllib.request.Request(LOGO_URL.format(domain=dominio), headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(richiesta, timeout=6) as r:
-            tipo = r.headers.get_content_type()
-            corpo = r.read(300_000)
-        if not tipo.startswith("image/"):
-            return ""
-        return f"data:{tipo};base64,{base64.b64encode(corpo).decode()}"
-    except Exception:
-        return ""
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def scarica_storico(ticker: str):
     """Candele giornaliere degli ultimi due anni per il grafico.
@@ -491,7 +467,8 @@ if avvia:
 
                 m = calcola_metriche(info, lang)
                 storico = scarica_storico(ticker_input)
-                logo = scarica_logo(info.get("website") or "")
+                # Usa direttamente il logo di Valore Capital
+                logo = LOGO_URL
 
                 # Concorrenti dello stesso settore per il confronto
                 st.write(T["cerca_conc"])
