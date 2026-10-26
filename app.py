@@ -22,6 +22,7 @@ from report_html import (
     genera_report,
     genera_frammento_report,
     grafico_tradingview,
+    grafico_rsi,
     tabella_metriche,
     genera_grafico_statico_png,
     genera_pdf_da_html,
@@ -367,15 +368,16 @@ if avvia:
                 logo = scarica_logo(info.get("website") or "")
                 esito = esegui_comitato(ticker_input, nome, info, m, st.write, lang)
 
-                # 1. Genera l'immagine del grafico per il PDF
+                # 1. Genera l'immagine del grafico a candele per il PDF
                 immagine_grafico = genera_grafico_statico_png(storico, m)
 
-                # 2. Genera l'HTML completo per il DOWNLOAD (con grafico statico)
+                # 2. Genera l'HTML completo per il DOWNLOAD (grafico statico + RSI)
                 html_report = genera_report(
-                    ticker_input, nome, info, m, esito, MODELLO, 
-                    grafico_statico=immagine_grafico, 
-                    lang=lang, 
-                    logo=logo
+                    ticker_input, nome, info, m, esito, MODELLO,
+                    grafico=grafico_rsi(storico, lang),
+                    grafico_statico=immagine_grafico,
+                    lang=lang,
+                    logo=logo,
                 )
 
                 # 3. Genera il PDF partendo dall'HTML completo
@@ -385,10 +387,16 @@ if avvia:
                     st.warning(f"Impossibile generare il PDF: {e_pdf}")
                     pdf_bytes = None
 
-                # 4. Genera il frammento HTML per la VISUALIZZAZIONE A SCHERMO (con grafico interattivo)
+                # 4. Genera il frammento HTML per la VISUALIZZAZIONE A SCHERMO
+                #    (TradingView interattivo + RSI statico con divergenze)
+                grafico_completo = (
+                    grafico_tradingview(ticker_input, storico, m, lang)
+                    + grafico_rsi(storico, lang)
+                )
+
                 html_schermo = genera_frammento_report(
                     ticker_input, nome, info, m, esito, MODELLO,
-                    grafico=grafico_tradingview(ticker_input, storico, m, lang),
+                    grafico=grafico_completo,
                     lang=lang,
                     logo=logo,
                 )
