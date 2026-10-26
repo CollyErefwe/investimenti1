@@ -23,6 +23,7 @@ from report_html import (
     genera_frammento_report,
     grafico_tradingview,
     grafico_rsi,
+    sezione_confronto,
     tabella_metriche,
     genera_grafico_statico_png,
     genera_pdf_da_html,
@@ -35,6 +36,9 @@ st.set_page_config(page_title="Analisi azionaria · Equity analysis", page_icon=
 # Per attivarlo indica un indirizzo con {domain}, per esempio:
 #   LOGO_URL = "https://servizio-loghi.example/{domain}"
 LOGO_URL = ""
+
+# Numero di concorrenti messi a confronto con il titolo analizzato.
+N_CONCORRENTI = 2
 
 # Aspetto della pagina: stessi colori e carattere del report.
 st.markdown(
@@ -57,6 +61,10 @@ div[data-baseweb="input"]:focus-within,div[data-baseweb="base-input"]:focus-with
 [data-testid="stRadio"] > div{justify-content:flex-end}
 button[kind^="primary"],button[data-testid^="stBaseButton-primary"]{background:#1d4e6e;border-color:#1d4e6e;color:#fff}
 button[kind^="primary"]:hover,button[data-testid^="stBaseButton-primary"]:hover{background:#163d57;border-color:#163d57;color:#fff}
+label[data-baseweb="radio"]:has(input:checked) > div:first-child{background-color:#1d4e6e !important;border-color:#1d4e6e !important}
+[data-baseweb="tab-highlight"]{background-color:#1d4e6e !important}
+button[data-baseweb="tab"][aria-selected="true"],button[data-baseweb="tab"][aria-selected="true"] p{color:#1d4e6e !important}
+button[data-baseweb="tab"]:hover,button[data-baseweb="tab"]:hover p{color:#1d4e6e !important}
 </style>
 """,
     unsafe_allow_html=True,
@@ -67,15 +75,21 @@ button[kind^="primary"]:hover,button[data-testid^="stBaseButton-primary"]:hover{
 UI = {
     "it": {
         "titolo": "Analisi investimento azionario",
-        "sottotitolo": "Un report di una pagina su un titolo, preparato da quattro analisti AI indipendenti.",
+        "sottotitolo": "Un report di una pagina su un titolo, preparato da quattro analisti AI indipendenti e confrontato con i maggiori concorrenti del settore.",
         "cerca_ph": "Nome o ticker, per esempio Apple, Ferrari, V o ENI.MI",
         "cerca_aiuto": "Scrivi il nome o il ticker e premi Invio: i titoli trovati compaiono nel menu accanto.",
         "scegli_ph": "Scegli il titolo dai suggerimenti",
+        "conc1_ph": "Concorrente 1 (facoltativo), per esempio MA",
+        "conc2_ph": "Concorrente 2 (facoltativo), per esempio AXP",
+        "conc_aiuto": "Facoltativo. Lascia vuoti i due campi per usare i maggiori concorrenti dell'industria trovati da Yahoo Finance, oppure scrivi un nome o un ticker e scegli dal menu accanto.",
+        "errore_conc": "Scegli il concorrente dai suggerimenti oppure svuota il campo.",
         "nessun_risultato": "Nessun titolo trovato per «{q}».",
         "genera": "Genera report",
         "errore_ticker": "Scegli un titolo dai suggerimenti oppure inserisci un ticker valido, per esempio V, AAPL o ENI.MI.",
         "in_corso": "Analisi di {t} in corso",
         "recupero": "Recupero dei dati da Yahoo Finance",
+        "cerca_conc": "Ricerca dei concorrenti nello stesso settore",
+        "conc_nd": "Non ho trovato concorrenti comparabili: il report è generato senza confronto. Puoi indicarli a mano nei campi «Concorrente».",
         "nessun_dato": "Nessun dato trovato per il ticker {t}.",
         "pronto": "Report pronto",
         "interrotta": "Analisi interrotta",
@@ -94,12 +108,13 @@ UI = {
         "nessuna_risposta": "Nessuna risposta.",
         "lingua_diversa": "Questo report è stato generato in {vecchia}. Premi «Genera report» per ottenerlo in {nuova}.",
         "nomi_lingua": {"it": "italiano", "en": "inglese"},
-        "intro": "Quattro analisti, ciascuno per conto suo",
+        "intro": "Quattro analisti, ciascuno per conto suo, e un confronto con i concorrenti",
         "voci": (
             ("Analisi contabile", "Free cash flow, debito, margini e ROE: quanto sono solidi i numeri."),
             ("Tesi rialzista", "Le ragioni più solide per cui l'azienda può crescere o rivalutarsi."),
             ("Tesi ribassista", "I rischi più seri e i segnali che li confermerebbero."),
             ("Macro e settore", "Come tassi, ciclo e regolamentazione incidono su questo settore."),
+            ("Confronto con i concorrenti", "Multipli, margini, crescita e leva messi a confronto con i due maggiori concorrenti, con i punti a favore e contro calcolati dal codice."),
         ),
         "footer": ("Strumento di analisi automatica.  \n"
                    "Non è consulenza in materia di investimenti.  \n"
@@ -131,15 +146,21 @@ UI = {
     },
     "en": {
         "titolo": "Equity investment analysis",
-        "sottotitolo": "A one-page report on a stock, prepared by four independent AI analysts.",
+        "sottotitolo": "A one-page report on a stock, prepared by four independent AI analysts and compared with the largest peers in its sector.",
         "cerca_ph": "Name or ticker, for example Apple, Ferrari, V or ENI.MI",
         "cerca_aiuto": "Type the name or ticker and press Enter: matching stocks appear in the menu next to it.",
         "scegli_ph": "Pick the stock from the suggestions",
+        "conc1_ph": "Peer 1 (optional), for example MA",
+        "conc2_ph": "Peer 2 (optional), for example AXP",
+        "conc_aiuto": "Optional. Leave both fields empty to use the largest industry peers found by Yahoo Finance, or type a name or ticker and pick from the menu next to it.",
+        "errore_conc": "Pick the peer from the suggestions or clear the field.",
         "nessun_risultato": "No stock found for \"{q}\".",
         "genera": "Generate report",
         "errore_ticker": "Pick a stock from the suggestions or enter a valid ticker, for example V, AAPL or ENI.MI.",
         "in_corso": "Analyzing {t}",
         "recupero": "Fetching data from Yahoo Finance",
+        "cerca_conc": "Looking for peers in the same sector",
+        "conc_nd": "No comparable peers found: the report is generated without a comparison. You can enter them by hand in the \"Peer\" fields.",
         "nessun_dato": "No data found for ticker {t}.",
         "pronto": "Report ready",
         "interrotta": "Analysis interrupted",
@@ -158,12 +179,13 @@ UI = {
         "nessuna_risposta": "No response.",
         "lingua_diversa": "This report was generated in {vecchia}. Press \"Generate report\" to get it in {nuova}.",
         "nomi_lingua": {"it": "Italian", "en": "English"},
-        "intro": "Four analysts, each on their own",
+        "intro": "Four analysts, each on their own, and a peer comparison",
         "voci": (
             ("Accounting analysis", "Free cash flow, debt, margins and ROE: how solid are the numbers."),
             ("Bull case", "The strongest reasons the company can grow or be re-rated."),
             ("Bear case", "The most serious risks and the signals that would confirm them."),
             ("Macro and sector", "How rates, the cycle and regulation affect this sector."),
+            ("Peer comparison", "Multiples, margins, growth and leverage set against the two largest peers, with points for and against calculated by the code."),
         ),
         "footer": ("Automated analysis tool.  \n"
                    "This is not investment advice.  \n"
@@ -229,6 +251,61 @@ def cerca_titoli(testo: str):
             }
         )
     return risultati
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def trova_concorrenti(ticker: str, industry_key: str, sector_key: str, massimo: int = 5):
+    """Simboli candidati come concorrenti: le maggiori società della stessa
+    industria secondo Yahoo Finance (yf.Industry). Solo se l'industria ne
+    fornisce meno di due si ripiega sul settore (yf.Sector), meno comparabile.
+    Se la ricerca non è disponibile restituisce una lista vuota."""
+    ticker = ticker.upper()
+    trovati = []
+    for classe, chiave in (("Industry", industry_key), ("Sector", sector_key)):
+        if len(trovati) >= 2:
+            break
+        if not chiave:
+            continue
+        try:
+            tabella = getattr(yf, classe)(chiave).top_companies
+        except Exception:
+            continue
+        if tabella is None or len(tabella) == 0:
+            continue
+        for simbolo in tabella.index:
+            simbolo = str(simbolo).upper()
+            if simbolo != ticker and simbolo not in trovati and re.fullmatch(TICKER_VALIDO, simbolo):
+                trovati.append(simbolo)
+            if len(trovati) >= massimo:
+                break
+    return trovati
+
+
+def scarica_concorrenti(ticker: str, info: dict, manuali: list, lang: str, n: int = N_CONCORRENTI):
+    """Restituisce (concorrenti, manuale). Ogni concorrente è un dict con
+    ticker, nome e metriche calcolate dal codice. Se l'utente non indica
+    nulla si prendono i candidati di Yahoo Finance e si tengono i `n` con la
+    capitalizzazione maggiore. Un concorrente senza dati viene scartato."""
+    manuale = [s for s in dict.fromkeys(manuali) if s != ticker.upper()][:n]
+    simboli = manuale or trova_concorrenti(
+        ticker, info.get("industryKey") or "", info.get("sectorKey") or ""
+    )
+    trovati = []
+    for simbolo in simboli:
+        try:
+            dati = scarica_info(simbolo)
+        except Exception:
+            continue
+        nome = dati.get("longName") or dati.get("shortName")
+        if not nome:
+            continue
+        metriche = calcola_metriche(dati, lang)
+        if metriche["prezzo"] is None and metriche["mcap"] is None:
+            continue
+        trovati.append({"ticker": simbolo, "nome": nome, "m": metriche})
+    if not manuale:
+        trovati.sort(key=lambda c: c["m"]["mcap"] or 0, reverse=True)
+    return trovati[:n], bool(manuale)
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -309,6 +386,42 @@ def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log, lang: str)
 
 # ------------------------------------------------------------------ pagina
 
+def campo_titolo(col_testo, col_menu, etichetta: str, chiave: str, segnaposto: str, aiuto: str):
+    """Campo di testo + menu dei suggerimenti (nome o ticker, per esempio
+    «sp» propone SPCX). Restituisce (testo, ci_sono_suggerimenti, ticker):
+    il ticker è None finché non si sceglie dal menu. Se la ricerca non è
+    disponibile vale il ticker scritto a mano."""
+    testo = col_testo.text_input(
+        etichetta + " (testo)", placeholder=segnaposto, help=aiuto, key=chiave, label_visibility="collapsed"
+    ).strip()
+    opzioni = cerca_titoli(testo) if testo else []
+    atteso = testo.upper()
+    simboli = [o["symbol"] for o in opzioni]
+    etichette = {
+        o["symbol"]: f"{o['symbol']} · {o['nome']}" + (f" ({o['borsa']})" if o["borsa"] else "")
+        for o in opzioni
+    }
+    indice = simboli.index(atteso) if atteso in simboli else None
+    if indice is None and len(simboli) == 1:
+        indice = 0  # un solo suggerimento: già selezionato
+    scelta = col_menu.selectbox(
+        etichetta,
+        simboli,
+        index=indice,
+        format_func=lambda simbolo: etichette[simbolo],
+        placeholder=T["scegli_ph"],
+        disabled=not simboli,
+        label_visibility="collapsed",
+    )
+    if simboli:
+        ticker = scelta
+    elif testo and re.fullmatch(TICKER_VALIDO, atteso):
+        ticker = atteso
+    else:
+        ticker = None
+    return testo, bool(simboli), ticker
+
+
 # Selettore lingua in alto a destra.
 _, colonna_lingua = st.columns([9, 1.6])
 scelta_lingua = colonna_lingua.radio(
@@ -325,35 +438,29 @@ st.markdown(
 
 # Ricerca: scrivi nome o ticker e premi Invio, poi scegli dal menu.
 colonna_testo, colonna_menu, colonna_pulsante = st.columns([3, 4, 1.6])
-testo_ricerca = colonna_testo.text_input(
-    "Ricerca", placeholder=T["cerca_ph"], help=T["cerca_aiuto"], key="ricerca", label_visibility="collapsed"
-).strip()
-opzioni = cerca_titoli(testo_ricerca) if testo_ricerca else []
-atteso = testo_ricerca.upper()
-indice_iniziale = next((i for i, o in enumerate(opzioni) if o["symbol"] == atteso), None)
-scelta = colonna_menu.selectbox(
-    "Titolo",
-    range(len(opzioni)),
-    index=indice_iniziale,
-    format_func=lambda i: f"{opzioni[i]['symbol']} · {opzioni[i]['nome']}"
-    + (f" ({opzioni[i]['borsa']})" if opzioni[i]["borsa"] else ""),
-    placeholder=T["scegli_ph"],
-    disabled=not opzioni,
-    label_visibility="collapsed",
+testo_ricerca, ha_opzioni, ticker_scelto = campo_titolo(
+    colonna_testo, colonna_menu, "Titolo", "ricerca", T["cerca_ph"], T["cerca_aiuto"]
 )
 avvia = colonna_pulsante.button(T["genera"], type="primary", use_container_width=True)
-if testo_ricerca and not opzioni and not re.fullmatch(TICKER_VALIDO, atteso):
+
+# Concorrenti facoltativi: stessa ricerca con suggerimenti. Se i due campi
+# restano vuoti si usano i concorrenti trovati da Yahoo Finance.
+c1_testo, c1_menu, _ = st.columns([3, 4, 1.6])
+testo_c1, _, ticker_c1 = campo_titolo(c1_testo, c1_menu, "Concorrente 1", "conc1", T["conc1_ph"], T["conc_aiuto"])
+c2_testo, c2_menu, _ = st.columns([3, 4, 1.6])
+testo_c2, _, ticker_c2 = campo_titolo(c2_testo, c2_menu, "Concorrente 2", "conc2", T["conc2_ph"], T["conc_aiuto"])
+manuali = [t for t in (ticker_c1, ticker_c2) if t]
+
+if testo_ricerca and not ha_opzioni and not re.fullmatch(TICKER_VALIDO, testo_ricerca.upper()):
     st.caption(T["nessun_risultato"].format(q=testo_ricerca))
 
 if avvia:
-    ticker_input = None
-    if opzioni and scelta is not None:
-        ticker_input = opzioni[scelta]["symbol"]
-    elif not opzioni and re.fullmatch(TICKER_VALIDO, atteso):
-        ticker_input = atteso  # ricerca non disponibile: vale il ticker scritto a mano
+    ticker_input = ticker_scelto
 
     if not ticker_input:
         st.error(T["errore_ticker"])
+    elif (testo_c1 and not ticker_c1) or (testo_c2 and not ticker_c2):
+        st.error(T["errore_conc"])
     else:
         with st.status(T["in_corso"].format(t=ticker_input), expanded=True) as status:
             try:
@@ -366,18 +473,29 @@ if avvia:
                 m = calcola_metriche(info, lang)
                 storico = scarica_storico(ticker_input)
                 logo = scarica_logo(info.get("website") or "")
+
+                # Concorrenti dello stesso settore per il confronto
+                st.write(T["cerca_conc"])
+                concorrenti, conc_manuali = scarica_concorrenti(ticker_input, info, manuali, lang)
+                if not concorrenti:
+                    st.warning(T["conc_nd"])
+                html_confronto = sezione_confronto(
+                    ticker_input, nome, m, concorrenti, lang, manuale=conc_manuali
+                )
+
                 esito = esegui_comitato(ticker_input, nome, info, m, st.write, lang)
 
                 # 1. Genera l'immagine del grafico a candele per il PDF
                 immagine_grafico = genera_grafico_statico_png(storico, m)
 
-                # 2. Genera l'HTML completo per il DOWNLOAD (grafico statico + RSI)
+                # 2. Genera l'HTML completo per il DOWNLOAD (grafico statico + RSI settimanale)
                 html_report = genera_report(
                     ticker_input, nome, info, m, esito, MODELLO,
                     grafico=grafico_rsi(storico, lang),
                     grafico_statico=immagine_grafico,
                     lang=lang,
                     logo=logo,
+                    confronto=html_confronto,
                 )
 
                 # 3. Genera il PDF partendo dall'HTML completo
@@ -388,7 +506,7 @@ if avvia:
                     pdf_bytes = None
 
                 # 4. Genera il frammento HTML per la VISUALIZZAZIONE A SCHERMO
-                #    (TradingView interattivo + RSI statico con divergenze)
+                #    (TradingView interattivo + RSI settimanale con divergenze)
                 grafico_completo = (
                     grafico_tradingview(ticker_input, storico, m, lang)
                     + grafico_rsi(storico, lang)
@@ -399,6 +517,7 @@ if avvia:
                     grafico=grafico_completo,
                     lang=lang,
                     logo=logo,
+                    confronto=html_confronto,
                 )
 
                 st.session_state["risultato"] = {
@@ -428,11 +547,11 @@ if risultato:
     scheda_report, scheda_dati, scheda_analisti = st.tabs(T["tabs"])
 
     with scheda_report:
-        components.html(risultato.get("html_schermo", risultato["html"]), height=1500, scrolling=True)
-        st.write("") 
-        
+        components.html(risultato.get("html_schermo", risultato["html"]), height=2000, scrolling=True)
+        st.write("")
+
         col_dl_pdf, col_dl_html = st.columns(2)
-        
+
         with col_dl_pdf:
             if risultato.get("pdf"):
                 st.download_button(
@@ -445,7 +564,7 @@ if risultato:
                 )
             else:
                 st.button("PDF non disponibile", disabled=True, use_container_width=True)
-                
+
         with col_dl_html:
             st.download_button(
                 label="🌐 " + T["scarica_html"],
@@ -454,7 +573,7 @@ if risultato:
                 mime="text/html",
                 use_container_width=True
             )
-            
+
         st.caption(T["cap_pdf"])
 
     with scheda_dati:
