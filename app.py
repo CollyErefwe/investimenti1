@@ -90,7 +90,7 @@ UI = {
         "recupero": "Recupero dei dati da Yahoo Finance",
         "cerca_conc": "Ricerca dei concorrenti nello stesso settore",
         "conc_nd": "Non ho trovato concorrenti comparabili: il report è generato senza confronto. Puoi indicarli a mano nei campi «Concorrente».",
-        "nessun_dato": "Nessun dato trovato per il ticker {t}.",
+        "nessun_dato": "Nessun dato trovato per il ticker {t}. Se il ticker è corretto, Yahoo Finance potrebbe aver limitato le richieste (online capita spesso): riprova tra qualche minuto.",
         "pronto": "Report pronto",
         "interrotta": "Analisi interrotta",
         "log": {"contabile": "Analista contabile", "bull": "Analista rialzista",
@@ -161,7 +161,7 @@ UI = {
         "recupero": "Fetching data from Yahoo Finance",
         "cerca_conc": "Looking for peers in the same sector",
         "conc_nd": "No comparable peers found: the report is generated without a comparison. You can enter them by hand in the \"Peer\" fields.",
-        "nessun_dato": "No data found for ticker {t}.",
+        "nessun_dato": "No data found for ticker {t}. If the ticker is right, Yahoo Finance may be limiting requests (common online): try again in a few minutes.",
         "pronto": "Report ready",
         "interrotta": "Analysis interrupted",
         "log": {"contabile": "Accounting analyst", "bull": "Bull analyst",
@@ -222,9 +222,27 @@ TICKER_VALIDO = r"[A-Z0-9.\-=^]{1,15}"
 
 # ------------------------------------------------------------------ dati
 
+class DatiNonDisponibili(Exception):
+    """Yahoo Finance non ha restituito i dati di un titolo."""
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def scarica_info(ticker: str) -> dict:
-    return yf.Ticker(ticker).info or {}
+    """Scheda dati del titolo da Yahoo Finance, con tre tentativi.
+
+    Se Yahoo non risponde (online capita spesso: limite di richieste sugli
+    indirizzi condivisi di Streamlit Cloud) solleva DatiNonDisponibili. Le
+    eccezioni non finiscono nella cache, quindi il tentativo successivo
+    riprova davvero invece di riavere per 15 minuti un risultato vuoto."""
+    for tentativo in range(3):
+        try:
+            dati = yf.Ticker(ticker).info or {}
+        except Exception:
+            dati = {}
+        if dati.get("longName") or dati.get("shortName"):
+            return dati
+        time.sleep(1 + tentativo)
+    raise DatiNonDisponibili(ticker)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -465,10 +483,11 @@ if avvia:
         with st.status(T["in_corso"].format(t=ticker_input), expanded=True) as status:
             try:
                 st.write(T["recupero"])
-                info = scarica_info(ticker_input)
-                nome = info.get("longName") or info.get("shortName")
-                if not nome:
+                try:
+                    info = scarica_info(ticker_input)
+                except DatiNonDisponibili:
                     raise ValueError(T["nessun_dato"].format(t=ticker_input))
+                nome = info.get("longName") or info.get("shortName")
 
                 m = calcola_metriche(info, lang)
                 storico = scarica_storico(ticker_input)
