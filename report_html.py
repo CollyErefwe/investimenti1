@@ -60,6 +60,18 @@ STR = {
                     "Linea blu continua: target medio. Linea nera punteggiata: prezzo attuale. "
                     "Linea arancione: media a 50 giorni. Linea viola: media a 200 giorni. "
                     "Prezzi da Yahoo Finance, fonte non ufficiale."),
+        # --- RSI ---
+        "rsi_titolo": "RSI (14) e divergenze",
+        "rsi_nd": "Storico insufficiente per calcolare l'RSI.",
+        "rsi_ipercomprato": "Ipercomprato (70)",
+        "rsi_ipovenduto": "Ipowenduto (30)",
+        "rsi_div_rialzista": "Divergenza rialzista",
+        "rsi_div_ribassista": "Divergenza ribassista",
+        "rsi_nessuna_div": "Nessuna divergenza rilevata negli ultimi 2 anni.",
+        "rsi_nota": ("RSI a 14 periodi (metodo Wilder). Linee tratteggiate a 30 e 70. "
+                     "La divergenza è segnalata quando prezzo e RSI si muovono in direzioni opposte "
+                     "tra due pivot consecutivi."),
+        "rsi_valore_attuale": "RSI attuale: {x}",
         "html_lang": "it", "titolo_report": "Report del comitato", "data_fmt": "%d/%m/%Y",
         "report_del": "Report del {d}", "dati_alle": "Dati aggiornati alle {t}",
         "settore_nd": "Settore non disponibile",
@@ -107,6 +119,18 @@ STR = {
                     "Solid blue line: mean target. Dotted black line: current price. "
                     "Orange line: 50-day average. Purple line: 200-day average. "
                     "Prices from Yahoo Finance, unofficial source."),
+        # --- RSI ---
+        "rsi_titolo": "RSI (14) and divergences",
+        "rsi_nd": "Not enough history to compute RSI.",
+        "rsi_ipercomprato": "Overbought (70)",
+        "rsi_ipovenduto": "Oversold (30)",
+        "rsi_div_rialzista": "Bullish divergence",
+        "rsi_div_ribassista": "Bearish divergence",
+        "rsi_nessuna_div": "No divergence detected over the last 2 years.",
+        "rsi_nota": ("14-period RSI (Wilder method). Dashed lines at 30 and 70. "
+                     "A divergence is flagged when price and RSI move in opposite directions "
+                     "between two consecutive pivots."),
+        "rsi_valore_attuale": "Current RSI: {x}",
         "html_lang": "en", "titolo_report": "Committee report", "data_fmt": "%d %b %Y",
         "report_del": "Report dated {d}", "dati_alle": "Data as of {t}",
         "settore_nd": "Sector not available",
@@ -561,6 +585,237 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
     )
 
 
+# --------------------------------------------- RSI e divergenze
+
+def _rsi(chiusure, periodo=14):
+    """RSI (Relative Strength Index) con smoothing di Wilder.
+    Restituisce una lista allineata a `chiusure` con None dove non calcolabile."""
+    n = len(chiusure)
+    out = [None] * n
+    if n < periodo + 1:
+        return out
+    guadagni, perdite = [], []
+    for i in range(1, n):
+        delta = chiusure[i] - chiusure[i - 1]
+        guadagni.append(max(delta, 0.0))
+        perdite.append(max(-delta, 0.0))
+    # media iniziale semplice sui primi `periodo` valori
+    media_g = sum(guadagni[:periodo]) / periodo
+    media_p = sum(perdite[:periodo]) / periodo
+
+    def _valore(mg, mp):
+        if mp == 0:
+            return 100.0 if mg > 0 else 50.0
+        rs = mg / mp
+        return 100.0 - 100.0 / (1.0 + rs)
+
+    out[periodo] = _valore(media_g, media_p)
+    for i in range(periodo + 1, n):
+        media_g = (media_g * (periodo - 1) + guadagni[i - 1]) / periodo
+        media_p = (media_p * (periodo - 1) + perdite[i - 1]) / periodo
+        out[i] = _valore(media_g, media_p)
+    return out
+
+
+def _pivot_locali(serie, finestra=5):
+    """Trova massimi e minimi locali in una serie (ignora i None).
+    Restituisce due liste di indici: (massimi, minimi)."""
+    massimi, minimi = [], []
+    n = len(serie)
+    for i in range(finestra, n - finestra):
+        v = serie[i]
+        if v is None:
+            continue
+        intorno = [serie[j] for j in range(i - finestra, i + finestra + 1)
+                   if j != i and serie[j] is not None]
+        if not intorno:
+            continue
+        if v >= max(intorno):
+            massimi.append(i)
+        elif v <= min(intorno):
+            minimi.append(i)
+    return massimi, minimi
+
+
+def _trova_divergenze(prezzi, rsi, finestra=5, sguardo=25):
+    """Cerca divergenze rialziste e ribassiste tra ultimi due pivot di prezzo.
+    Restituisce lista di dict: {tipo, i1, i2} con gli indici degli estremi.
+    - rialzista: prezzo fa minimi più bassi, RSI fa minimi più alti.
+    - ribassista: prezzo fa massimi più alti, RSI fa massimi più bassi."""
+    if not prezzi or len(prezzi) < finestra * 2 + 2:
+        return []
+    idx_massimi_p, idx_minimi_p = _pivot_locali(prezzi, finestra)
+    divergenze = []
+
+    # Divergenze rialziste sui minimi
+    if len(idx_minimi_p) >= 2:
+        ultimi = idx_minimi_p[-sguardo:] if len(idx_minimi_p) > sguardo else idx_minimi_p
+        for k in range(len(ultimi) - 1):
+            i1, i2 = ultimi[k], ultimi[k + 1]
+            if prezzi[i2] < prezzi[i1] and rsi[i1] is not None and rsi[i2] is not None:
+                if rsi[i2] > rsi[i1] + 1.5:  # tolleranza minima
+                    divergenze.append({"tipo": "rialzista", "i1": i1, "i2": i2})
+
+    # Divergenze ribassiste sui massimi
+    if len(idx_massimi_p) >= 2:
+        ultimi = idx_massimi_p[-sguardo:] if len(idx_massimi_p) > sguardo else idx_massimi_p
+        for k in range(len(ultimi) - 1):
+            i1, i2 = ultimi[k], ultimi[k + 1]
+            if prezzi[i2] > prezzi[i1] and rsi[i1] is not None and rsi[i2] is not None:
+                if rsi[i2] < rsi[i1] - 1.5:
+                    divergenze.append({"tipo": "ribassista", "i1": i1, "i2": i2})
+
+    # Teniamo solo le più recenti (max 2 per tipo)
+    div_rialz = [d for d in divergenze if d["tipo"] == "rialzista"][-2:]
+    div_ribass = [d for d in divergenze if d["tipo"] == "ribassista"][-2:]
+    return div_rialz + div_ribass
+
+
+_RSI_CSS = """
+<style>
+.rsi-box{margin-top:14px;border:1px solid var(--rule);padding:10px 12px 6px;background:#fff}
+.rsi-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.rsi-head h3{font:700 12px/1.2 var(--sans);letter-spacing:.05em;text-transform:uppercase;
+color:var(--ink);margin:0}
+.rsi-head .cur{font-size:12px;color:var(--slate);font-variant-numeric:tabular-nums}
+.rsi-head .cur b{color:var(--ink)}
+.rsi-svg{display:block;width:100%;height:150px}
+.rsi-legenda{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:4px;font-size:10.5px;color:var(--slate)}
+.rsi-legenda .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;
+vertical-align:middle}
+.rsi-legenda .r{background:#a8412f}.rsi-legenda .v{background:#2b7a57}
+</style>
+"""
+
+
+def grafico_rsi(storico, lang: str = None) -> str:
+    """Grafico RSI a 14 periodi in SVG (funziona anche nel PDF), con
+    evidenziazione delle divergenze rialziste/ribassiste rilevate."""
+    _imposta(lang)
+    if not storico or len(storico) < 30:
+        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
+                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+
+    chiusure = [r["close"] for r in storico]
+    rsi = _rsi(chiusure, 14)
+    divergenze = _trova_divergenze(chiusure, rsi)
+
+    W, H = 760, 150
+    pad_l, pad_r, pad_t, pad_b = 35, 10, 8, 18
+    plot_w = W - pad_l - pad_r
+    plot_h = H - pad_t - pad_b
+    n = len(rsi)
+    validi = [(i, v) for i, v in enumerate(rsi) if v is not None]
+    if not validi:
+        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
+                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+    i_primo = validi[0][0]
+
+    def x(i):
+        return pad_l + (i - i_primo) / max(1, n - 1 - i_primo) * plot_w
+
+    def y(v):
+        return pad_t + (1 - v / 100.0) * plot_h
+
+    # Polilinea RSI
+    punti = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in validi)
+
+    # Aree colorate (molto tenui)
+    path_top = (
+        f"M{x(i_primo):.1f},{y(100):.1f} "
+        f"L{x(i_primo):.1f},{y(70):.1f} "
+        + " ".join(f"L{x(i):.1f},{y(min(v, 70)):.1f}" for i, v in validi)
+        + f" L{x(n - 1):.1f},{y(100):.1f} Z"
+    )
+    path_bot = (
+        f"M{x(i_primo):.1f},{y(0):.1f} "
+        f"L{x(i_primo):.1f},{y(30):.1f} "
+        + " ".join(f"L{x(i):.1f},{y(max(v, 30)):.1f}" for i, v in validi)
+        + f" L{x(n - 1):.1f},{y(0):.1f} Z"
+    )
+
+    # Linee di divergenza
+    linee_div = []
+    for d in divergenze:
+        colore = "#2b7a57" if d["tipo"] == "rialzista" else "#a8412f"
+        x1, y1 = x(d["i1"]), y(rsi[d["i1"]])
+        x2, y2 = x(d["i2"]), y(rsi[d["i2"]])
+        linee_div.append(
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="{colore}" stroke-width="2" stroke-dasharray="4,3" opacity="0.9"/>'
+        )
+        linee_div.append(
+            f'<circle cx="{x1:.1f}" cy="{y1:.1f}" r="3" fill="{colore}"/>'
+            f'<circle cx="{x2:.1f}" cy="{y2:.1f}" r="3" fill="{colore}"/>'
+        )
+
+    # Etichette asse Y e linee 30/50/70
+    etichette = ""
+    
+    # Linea 50 (continua, grigio chiaro, sottilissima)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(50):.1f}" x2="{W - pad_r}" y2="{y(50):.1f}" '
+        f'stroke="#e2e8f0" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(50) + 4:.1f}" text-anchor="end" '
+        f'font-size="10" font-weight="normal" fill="#94a3b8">50</text>'
+    )
+    
+    # Linea 70 (continua, grigio chiaro)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(70):.1f}" x2="{W - pad_r}" y2="{y(70):.1f}" '
+        f'stroke="#cbd5e1" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(70) + 4:.1f}" text-anchor="end" '
+        f'font-size="11" font-weight="normal" fill="#64748b">70</text>'
+    )
+    
+    # Linea 30 (continua, grigio chiaro)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(30):.1f}" x2="{W - pad_r}" y2="{y(30):.1f}" '
+        f'stroke="#cbd5e1" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(30) + 4:.1f}" text-anchor="end" '
+        f'font-size="11" font-weight="normal" fill="#64748b">30</text>'
+    )
+
+    valore_attuale = rsi[-1] if rsi[-1] is not None else None
+    etichetta_attuale = (
+        _t("rsi_valore_attuale").format(x=f"{valore_attuale:.1f}")
+        if valore_attuale is not None else ""
+    )
+
+    # Legenda divergenze
+    legenda = []
+    ha_rialz = any(d["tipo"] == "rialzista" for d in divergenze)
+    ha_ribass = any(d["tipo"] == "ribassista" for d in divergenze)
+    if ha_rialz:
+        legenda.append(f'<span><span class="dot v"></span>{_t("rsi_div_rialzista")}</span>')
+    if ha_ribass:
+        legenda.append(f'<span><span class="dot r"></span>{_t("rsi_div_ribassista")}</span>')
+    if not legenda:
+        legenda.append(f'<span>{_t("rsi_nessuna_div")}</span>')
+
+    return (
+        '<section class="rsi">' + _RSI_CSS
+        + f"<h2>{_t('rsi_titolo')}</h2>"
+        + '<div class="rsi-box">'
+        + '<div class="rsi-head">'
+        + f'<h3>{_t("rsi_ipercomprato")} / {_t("rsi_ipovenduto")}</h3>'
+        + f'<div class="cur"><b>{etichetta_attuale}</b></div>'
+        + '</div>'
+        + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
+          f'xmlns="http://www.w3.org/2000/svg">'
+        + f'<path d="{path_top}" fill="#ef4444" opacity="0.05"/>'
+        + f'<path d="{path_bot}" fill="#22c55e" opacity="0.05"/>'
+        + etichette
+        + f'<polyline points="{punti}" fill="none" stroke="#1d4e6e" stroke-width="1.8"/>'
+        + "".join(linee_div)
+        + '</svg>'
+        + f'<div class="rsi-legenda">{"".join(legenda)}</div>'
+        + f'<p class="nota">{html.escape(_t("rsi_nota"))}</p>'
+        + '</div>'
+        + '</section>'
+    )
+
+
 # --------------------------------------------------------------------- HTML
 
 def testo_html(testo) -> str:
@@ -711,7 +966,7 @@ def genera_grafico_statico_png(storico: list, m: dict) -> str:
     df = pd.DataFrame(storico)
     df['time'] = pd.to_datetime(df['time'])
     
-    fig, ax = plt.subplots(figsize=(8, 3.2)) # Formato perfetto per A4
+    fig, ax = plt.subplots(figsize=(8, 3.2))  # Formato perfetto per A4
     
     up = df[df.close >= df.open]
     down = df[df.close < df.open]
@@ -770,7 +1025,7 @@ def genera_pdf_da_html(html_content: str) -> bytes:
         # Genera il PDF (formato A4)
         pdf_bytes = page.pdf(
             format="A4",
-            print_background=True, # Importante: stampa i colori di sfondo!
+            print_background=True,  # Importante: stampa i colori di sfondo!
             margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
         )
         browser.close()
