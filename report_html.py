@@ -410,6 +410,49 @@ background:rgba(29,78,110,.10);border-top:1px solid rgba(29,78,110,.30);border-b
 </style>
 """
 
+_TV_CSS = """
+<style>
+.tv-barra{display:flex;gap:6px;margin:0 0 8px}
+.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
+.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
+.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
+background:rgba(56, 132, 255, 0.08);border-top:1px solid rgba(56, 132, 255, 0.25);border-bottom:1px solid rgba(56, 132, 255, 0.25)}
+.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
+.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
+@media print{.tv{display:none}}
+</style>
+"""
+
+_TV_CSS = """
+<style>
+.tv-barra{display:flex;gap:6px;margin:0 0 8px}
+.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
+.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
+/* Sfondo della fascia ora in grigio leggerissimo */
+.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
+background:rgba(200, 200, 200, 0.1);border-top:1px solid rgba(200, 200, 200, 0.3);border-bottom:1px solid rgba(200, 200, 200, 0.3)}
+.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
+.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
+@media print{.tv{display:none}}
+</style>
+"""
+
+_TV_CSS = """
+<style>
+.tv-barra{display:flex;gap:6px;margin:0 0 8px}
+.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
+.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
+.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
+background:rgba(29,78,110,.10);border-top:1px solid rgba(29,78,110,.30);border-bottom:1px solid rgba(29,78,110,.30)}
+.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
+.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
+@media print{.tv{display:none}}
+</style>
+"""
+ 
 _TV_JS = """
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script>
@@ -424,10 +467,12 @@ _TV_JS = """
     width: box.clientWidth, height: 320,
     layout: {background: {type: 'solid', color: '#ffffff'}, textColor: '#566273', fontSize: 11,
              fontFamily: '"Segoe UI","Helvetica Neue",Arial,sans-serif'},
-    grid: {vertLines: {color: '#eef0f3'}, horzLines: {color: '#eef0f3'}},
-    rightPriceScale: {borderColor: '#d6dbe2', scaleMargins: {top: 0.08, bottom: 0.08}},
-    timeScale: {borderColor: '#d6dbe2'},
-    crosshair: {mode: 0}
+    grid: {vertLines: {color: '#f1f3f6'}, horzLines: {color: '#f1f3f6'}},
+    rightPriceScale: {borderColor: '#e2e6ec', scaleMargins: {top: 0.08, bottom: 0.08}},
+    timeScale: {borderColor: '#e2e6ec'},
+    crosshair: {mode: 0,
+      vertLine: {color: '#cbd5e1', labelBackgroundColor: '#64748b'},
+      horzLine: {color: '#cbd5e1', labelBackgroundColor: '#64748b'}}
   });
   var L = D.livelli;
   var estremi = [L.tmin, L.tmax, L.target].filter(function(x){ return x !== null; });
@@ -445,48 +490,34 @@ _TV_JS = """
     }
   });
   cs.setData(D.candele);
-
+ 
   function media(dati, colore) {
     if (!dati.length) return;
     var s = chart.addLineSeries({color: colore, lineWidth: 1, lastValueVisible: false,
                                  priceLineVisible: false, crosshairMarkerVisible: false});
     s.setData(dati);
   }
-  media(D.sma50, '#c98a1b');
-  media(D.sma200, '#6b4c9a');
-
-  function linea(prezzo, titolo, colore, stile, spessore) {
+  media(D.sma50, '#d9a94f');
+  media(D.sma200, '#9482b8');
+ 
+  // Livelli: linee sottili e chiare. Il colore dell'etichetta sull'asse è
+  // indipendente da quello della linea (axisLabelColor / axisLabelTextColor).
+  var STILE_ESTREMI = {linea: '#b9c4d1', stile: 2, etichetta: '#e9eef3', testo: '#475569'};   // tratteggiata
+  var STILE_MEDIO   = {linea: '#8fa1b5', stile: 0, etichetta: '#dde4ec', testo: '#334155'};   // continua
+  var STILE_PREZZO  = {linea: '#64748b', stile: 1, etichetta: '#64748b', testo: '#ffffff'};   // punteggiata
+ 
+  function livello(prezzo, titolo, o) {
     if (prezzo === null) return;
-    cs.createPriceLine({price: prezzo, color: colore, lineWidth: spessore, lineStyle: stile,
-                        axisLabelVisible: true, title: titolo});
+    cs.createPriceLine({
+      price: prezzo, title: titolo, color: o.linea, lineWidth: 1, lineStyle: o.stile,
+      axisLabelVisible: true, axisLabelColor: o.etichetta, axisLabelTextColor: o.testo
+    });
   }
-  linea(L.tmax, D.et.tmax, '#1d4e6e', 2, 1);
-  linea(L.tmin, D.et.tmin, '#1d4e6e', 2, 1);
-  linea(L.target, D.et.target, '#1d4e6e', 0, 2);
-  linea(L.prezzo, D.et.prezzo, '#17202b', 1, 1);
-
-  var banda = null;
-  if (L.tmin !== null && L.tmax !== null) {
-    banda = document.createElement('div');
-    banda.className = 'tv-banda';
-    box.appendChild(banda);
-  }
-  function aggiorna() {
-    if (banda) {
-      var y1 = cs.priceToCoordinate(L.tmax), y2 = cs.priceToCoordinate(L.tmin);
-      if (y1 === null || y2 === null) {
-        banda.style.display = 'none';
-      } else {
-        banda.style.display = 'block';
-        banda.style.top = Math.min(y1, y2) + 'px';
-        banda.style.height = Math.abs(y2 - y1) + 'px';
-        banda.style.width = chart.timeScale().width() + 'px';
-      }
-    }
-    requestAnimationFrame(aggiorna);
-  }
-  aggiorna();
-
+  livello(L.tmax, D.et.tmax, STILE_ESTREMI);
+  livello(L.tmin, D.et.tmin, STILE_ESTREMI);
+  livello(L.target, D.et.target, STILE_MEDIO);
+  livello(L.prezzo, D.et.prezzo, STILE_PREZZO);
+ 
   function intervallo(giorni) {
     var ts = chart.timeScale();
     if (!giorni) { ts.fitContent(); return; }
@@ -505,15 +536,15 @@ _TV_JS = """
     });
   });
   intervallo(365);
-
+ 
   function adatta() { chart.applyOptions({width: box.clientWidth}); }
   if (typeof ResizeObserver !== 'undefined') { new ResizeObserver(adatta).observe(box); }
   window.addEventListener('resize', adatta);
 })();
 </script>
 """
-
-
+ 
+ 
 def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
     """Sezione HTML con il grafico (Lightweight Charts di TradingView) per
     l'uso a schermo. `storico` è una lista di dict con time (AAAA-MM-GG),
@@ -526,15 +557,15 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
             f'<section class="tv"><h2>{_t("tv_titolo")}</h2>'
             f'<p class="nd">{_t("tv_nd")}</p></section>'
         )
-
+ 
     v = m["valuta"]
     chiusure = [r["close"] for r in storico]
     s50 = _media_mobile(chiusure, 50)
     s200 = _media_mobile(chiusure, 200)
-
+ 
     def serie(ms):
         return [{"time": r["time"], "value": round(x, 4)} for r, x in zip(storico, ms) if x is not None]
-
+ 
     prezzo = m["prezzo"] if m["prezzo"] is not None else chiusure[-1]
     et = {
         "prezzo": _t("tv_prezzo").format(x=_it(prezzo)),
@@ -556,7 +587,7 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
         "msg": _t("tv_offline"),
     }
     dati_js = json.dumps(dati).replace("</", "<\\/")
-
+ 
     fatti = []
     if s50[-1]:
         fatti.append(f"{_t('tv_f50')} <b>{_it(s50[-1])}</b> ({_t('tv_fprezzo')} {fmt_pct(prezzo / s50[-1] - 1, segno=True)})")
@@ -569,9 +600,9 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
     if m["min52"]:
         fatti.append(f"{_t('tv_fmin')} <b>{fmt_pct(prezzo / m['min52'] - 1, segno=True)}</b>")
     righe_fatti = "".join(f"<span>{f}</span>" for f in fatti)
-
+ 
     nota = html.escape(_t("tv_nota").format(v=v))
-
+ 
     return (
         '<section class="tv">' + _TV_CSS
         + f"<h2>{_t('tv_titolo')}</h2>"
@@ -583,7 +614,134 @@ def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
         + _TV_JS.replace("__DATI__", dati_js)
         + "</section>"
     )
+ 
+ 
+# --------------------------------------------- RSI e divergenze
 
+def grafico_rsi(storico, lang: str = None) -> str:
+    _imposta(lang)
+    if not storico or len(storico) < 30:
+        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
+                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+
+    chiusure = [r["close"] for r in storico]
+    rsi = _rsi(chiusure, 14)
+    divergenze = _trova_divergenze(chiusure, rsi)
+
+    W, H = 760, 150
+    pad_l, pad_r, pad_t, pad_b = 35, 10, 8, 18
+    plot_w = W - pad_l - pad_r
+    plot_h = H - pad_t - pad_b
+    n = len(rsi)
+    validi = [(i, v) for i, v in enumerate(rsi) if v is not None]
+    if not validi:
+        return (f'<section class="rsi"><h2>{_t("rsi_titolo")}</h2>'
+                f'<p class="nd">{_t("rsi_nd")}</p></section>')
+    i_primo = validi[0][0]
+
+    def x(i):
+        return pad_l + (i - i_primo) / max(1, n - 1 - i_primo) * plot_w
+
+    def y(v):
+        return pad_t + (1 - v / 100.0) * plot_h
+
+    # Polilinea RSI
+    punti = " ".join(f"{x(i):.1f},{y(v):.1f}" for i, v in validi)
+
+    # Aree colorate (molto tenui)
+    path_top = (
+        f"M{x(i_primo):.1f},{y(100):.1f} "
+        f"L{x(i_primo):.1f},{y(70):.1f} "
+        + " ".join(f"L{x(i):.1f},{y(min(v, 70)):.1f}" for i, v in validi)
+        + f" L{x(n - 1):.1f},{y(100):.1f} Z"
+    )
+    path_bot = (
+        f"M{x(i_primo):.1f},{y(0):.1f} "
+        f"L{x(i_primo):.1f},{y(30):.1f} "
+        + " ".join(f"L{x(i):.1f},{y(max(v, 30)):.1f}" for i, v in validi)
+        + f" L{x(n - 1):.1f},{y(0):.1f} Z"
+    )
+
+    # Linee di divergenza
+    linee_div = []
+    for d in divergenze:
+        colore = "#2b7a57" if d["tipo"] == "rialzista" else "#a8412f"
+        x1, y1 = x(d["i1"]), y(rsi[d["i1"]])
+        x2, y2 = x(d["i2"]), y(rsi[d["i2"]])
+        linee_div.append(
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="{colore}" stroke-width="2" stroke-dasharray="4,3" opacity="0.9"/>'
+        )
+        linee_div.append(
+            f'<circle cx="{x1:.1f}" cy="{y1:.1f}" r="3" fill="{colore}"/>'
+            f'<circle cx="{x2:.1f}" cy="{y2:.1f}" r="3" fill="{colore}"/>'
+        )
+
+    # Etichette asse Y e linee 30/50/70 (molto chiare)
+    etichette = ""
+    
+    # Linea 50 (continua, grigio chiarissimo)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(50):.1f}" x2="{W - pad_r}" y2="{y(50):.1f}" '
+        f'stroke="#f1f5f9" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(50) + 4:.1f}" text-anchor="end" '
+        f'font-size="10" font-weight="normal" fill="#cbd5e1">50</text>'
+    )
+    
+    # Linea 70 (continua, grigio chiaro)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(70):.1f}" x2="{W - pad_r}" y2="{y(70):.1f}" '
+        f'stroke="#e2e8f0" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(70) + 4:.1f}" text-anchor="end" '
+        f'font-size="11" font-weight="normal" fill="#94a3b8">70</text>'
+    )
+    
+    # Linea 30 (continua, grigio chiaro)
+    etichette += (
+        f'<line x1="{pad_l}" y1="{y(30):.1f}" x2="{W - pad_r}" y2="{y(30):.1f}" '
+        f'stroke="#e2e8f0" stroke-width="1"/>'
+        f'<text x="{pad_l - 6}" y="{y(30) + 4:.1f}" text-anchor="end" '
+        f'font-size="11" font-weight="normal" fill="#94a3b8">30</text>'
+    )
+
+    valore_attuale = rsi[-1] if rsi[-1] is not None else None
+    etichetta_attuale = (
+        _t("rsi_valore_attuale").format(x=f"{valore_attuale:.1f}")
+        if valore_attuale is not None else ""
+    )
+
+    # Legenda divergenze
+    legenda = []
+    ha_rialz = any(d["tipo"] == "rialzista" for d in divergenze)
+    ha_ribass = any(d["tipo"] == "ribassista" for d in divergenze)
+    if ha_rialz:
+        legenda.append(f'<span><span class="dot v"></span>{_t("rsi_div_rialzista")}</span>')
+    if ha_ribass:
+        legenda.append(f'<span><span class="dot r"></span>{_t("rsi_div_ribassista")}</span>')
+    if not legenda:
+        legenda.append(f'<span>{_t("rsi_nessuna_div")}</span>')
+
+    return (
+        '<section class="rsi">' + _RSI_CSS
+        + f"<h2>{_t('rsi_titolo')}</h2>"
+        + '<div class="rsi-box">'
+        + '<div class="rsi-head">'
+        + f'<h3>{_t("rsi_ipercomprato")} / {_t("rsi_ipovenduto")}</h3>'
+        + f'<div class="cur"><b>{etichetta_attuale}</b></div>'
+        + '</div>'
+        + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
+          f'xmlns="http://www.w3.org/2000/svg">'
+        + f'<path d="{path_top}" fill="#ef4444" opacity="0.05"/>'
+        + f'<path d="{path_bot}" fill="#22c55e" opacity="0.05"/>'
+        + etichette
+        + f'<polyline points="{punti}" fill="none" stroke="#1d4e6e" stroke-width="1.8"/>'
+        + "".join(linee_div)
+        + '</svg>'
+        + f'<div class="rsi-legenda">{"".join(legenda)}</div>'
+        + f'<p class="nota">{html.escape(_t("rsi_nota"))}</p>'
+        + '</div>'
+        + '</section>'
+    )
 
 # --------------------------------------------- RSI e divergenze
 
