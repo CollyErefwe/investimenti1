@@ -1,3 +1,6 @@
 streamlit
 groq
 yfinance
+pandas
+matplotlib
+playwright
