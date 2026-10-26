@@ -21,22 +21,46 @@ def chiedi_agente(
     contesto: str,
     max_t: int = 800,
     pausa: int = 6,
+    lingua: str = "it",
 ) -> str:
     print(f"[>] Al lavoro: {ruolo}...")
     time.sleep(pausa)
 
-    prompt = (
-        f"Ruolo: {ruolo}\n"
-        f"Obiettivo: {compito}\n\n"
-        f"DATI:\n{contesto}\n\n"
-        "VINCOLI TASSATIVI:\n"
-        "- Rispondi ESCLUSIVAMENTE in lingua italiana.\n"
-        "- Scrivi solo 2 punti elenco preceduti da trattino '- '.\n"
-        "- Ogni punto deve essere una singola frase di massimo 18 parole.\n"
-        "- Termina OBBLIGATORIAMENTE ogni riga con il punto fermo '.' prima di"
-        " fermarti.\n"
-        "- Nessun preambolo, nessun commento in inglese."
-    )
+    if lingua == "en":
+        prompt = (
+            f"Role: {ruolo}\n"
+            f"Objective: {compito}\n\n"
+            f"DATA:\n{contesto}\n\n"
+            "MANDATORY CONSTRAINTS:\n"
+            "- Reply EXCLUSIVELY in English.\n"
+            "- Write only 2 bullet points preceded by a dash '- '.\n"
+            "- Each point must be a single sentence of at most 18 words.\n"
+            "- You MUST end every line with a full stop '.' before stopping.\n"
+            "- No preamble, no comments in any other language."
+        )
+        sistema = (
+            "You are an institutional equity analyst. Reply "
+            "exclusively in English with 2 clear, complete and concise bullet points."
+        )
+        errore_api = "- Data currently unavailable due to API overload."
+    else:
+        prompt = (
+            f"Ruolo: {ruolo}\n"
+            f"Obiettivo: {compito}\n\n"
+            f"DATI:\n{contesto}\n\n"
+            "VINCOLI TASSATIVI:\n"
+            "- Rispondi ESCLUSIVAMENTE in lingua italiana.\n"
+            "- Scrivi solo 2 punti elenco preceduti da trattino '- '.\n"
+            "- Ogni punto deve essere una singola frase di massimo 18 parole.\n"
+            "- Termina OBBLIGATORIAMENTE ogni riga con il punto fermo '.' prima di"
+            " fermarti.\n"
+            "- Nessun preambolo, nessun commento in inglese."
+        )
+        sistema = (
+            "Sei un equity analyst istituzionale. Rispondi "
+            "esclusivamente in lingua italiana con 2 punti elenco chiari, completi e sintetici."
+        )
+        errore_api = "- Dati al momento non disponibili per sovraccarico API."
 
     tentativi = 3
     for tentativo in range(tentativi):
@@ -46,10 +70,7 @@ def chiedi_agente(
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "Sei un equity analyst istituzionale. Rispondi "
-                            "esclusivamente in lingua italiana con 2 punti elenco chiari, completi e sintetici."
-                        ),
+                        "content": sistema,
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -78,7 +99,7 @@ def chiedi_agente(
                 print(f"[!] Errore API: {e}")
                 time.sleep(3)
 
-    return "- Dati al momento non disponibili per sovraccarico API."
+    return errore_api
 
 
 def genera_scheda_html(
