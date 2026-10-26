@@ -7,10 +7,134 @@ con dati di fantasia.
 from __future__ import annotations
 
 import html
+import json
 import re
 import time
+import base64
+import io
 
-ND = "N/D"
+from contextvars import ContextVar
+
+# Import per il grafico statico e il PDF
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+
+# ------------------------------------------------------------------ lingua
+# La lingua corrente vive in una ContextVar: ogni sessione Streamlit gira nel
+# suo thread, quindi due utenti con lingue diverse non si disturbano.
+_LANG = ContextVar("lingua_report", default="it")
+
+STR = {
+    "it": {
+        "nd": "N/D", "mld": "mld", "mln": "mln",
+        "av_prezzo": "Prezzo non disponibile.",
+        "av_fcf": "Free cash flow non disponibile: i rapporti che lo usano non sono calcolati.",
+        "av_valuta": "Il prezzo è in {v} e il bilancio in {vb}: rendimento e multiplo sul free cash flow non sono calcolati.",
+        "cassa_netta": "Cassa netta", "fcf_neg": "FCF non positivo", "anni_fcf": "anni di FCF",
+        "margine_netto": "Margine netto", "margine_op": "Margine operativo", "roe": "ROE",
+        "crescita": "Crescita ricavi (trimestre su anno)", "fcf": "Free cash flow", "cassa": "Cassa",
+        "debito": "Debito totale", "debito_netto": "Debito netto", "dn_fcf": "Debito netto rispetto al FCF",
+        "mcap": "Capitalizzazione", "ev": "Valore d'impresa (EV)", "pe_fwd": "P/E atteso (forward)",
+        "pe_trail": "P/E storico (trailing)", "ev_ebitda": "EV / EBITDA", "p_fcf": "Prezzo / free cash flow",
+        "fcf_yield": "Rendimento da free cash flow", "upside": "Potenziale rispetto al target medio",
+        "prezzo": "Prezzo", "range52": "Minimo / massimo 52 settimane", "range_target": "Target minimo / medio / massimo",
+        "ag_azienda": "Azienda", "ag_settore": "Settore", "ag_industria": "Industria", "ag_mcap": "Capitalizzazione",
+        "ag_52": "Intervallo 52 settimane", "ag_target": "Target analisti (min / medio / max)",
+        "ag_upside": "Potenziale sul target medio", "ag_pfcf": "Prezzo/FCF", "ag_yield": "Rendimento da FCF",
+        "ag_crescita": "Crescita ricavi (trimestre su anno)", "ag_dnfcf": "Debito netto / FCF (anni)",
+        "ag_avvisi": "Avvisi sui dati",
+        "ag_nota": "I rapporti sono già calcolati dal sistema: non rifare i calcoli.",
+        "dato_nd": "Dato non disponibile.", "intervalli_nd": "Intervalli di prezzo non disponibili.",
+        "ultime52": "Ultime 52 settimane", "target_analisti": "Target degli analisti",
+        "nota_valori": "Valori in {v}. La linea verticale è il prezzo attuale.",
+        "nota_target": " Il segno scuro è il target medio ({t}{up}{n}).",
+        "up_sul_prezzo": ", {x} sul prezzo", "n_analisti": ", {n} analisti",
+        "tv_titolo": "Andamento del prezzo", "tv_nd": "Storico dei prezzi non disponibile.",
+        "tv_offline": "Grafico non disponibile: serve una connessione internet.",
+        "tv_prezzo": "Prezzo {x}", "tv_target": "Target medio {x}", "tv_tmin": "Target min {x}", "tv_tmax": "Target max {x}",
+        "tv_1a": "1A", "tv_2a": "2A",
+        "tv_f50": "Media 50 giorni", "tv_f200": "Media 200 giorni", "tv_fprezzo": "prezzo",
+        "tv_fdist": "Distanza dal target medio", "tv_fmax": "Dal massimo 52 settimane", "tv_fmin": "Dal minimo 52 settimane",
+        "tv_nota": ("Valori in {v}. Fascia azzurra: intervallo dei target degli analisti. "
+                    "Linea blu continua: target medio. Linea nera punteggiata: prezzo attuale. "
+                    "Linea arancione: media a 50 giorni. Linea viola: media a 200 giorni. "
+                    "Prezzi da Yahoo Finance, fonte non ufficiale."),
+        "html_lang": "it", "titolo_report": "Report del comitato", "data_fmt": "%d/%m/%Y",
+        "report_del": "Report del {d}", "dati_alle": "Dati aggiornati alle {t}",
+        "settore_nd": "Settore non disponibile",
+        "h_prezzo_target": "Prezzo e target", "h_bull": "Tesi rialzista", "h_bear": "Tesi ribassista",
+        "h_qualita": "Qualità e solidità", "h_valutazione": "Valutazione",
+        "h_contabile": "Analisi contabile", "h_macro": "Contesto macro e di settore",
+        "f_note": "Note sui dati", "f_fonti": "Fonti e metodo", "f_avvert": "Avvertenze",
+        "f_fonti1": "Dati di mercato e di bilancio: Yahoo Finance tramite yfinance, fonte non ufficiale. Rapporti, medie mobili e distanze sono calcolati dal sistema.",
+        "f_fonti2": "Le sezioni di analisi sono redatte da modelli linguistici che lavorano in modo indipendente e possono contenere errori.",
+        "f_modello": " Modello linguistico utilizzato: {m}.",
+        "f_avvert1": "Documento di analisi generale a solo scopo informativo. Non costituisce consulenza in materia di investimenti, raccomandazione personalizzata né sollecitazione all&rsquo;acquisto o alla vendita di strumenti finanziari.",
+        "f_avvert2": "I risultati passati non sono indicativi di quelli futuri. Verificare le cifre sui documenti ufficiali della società prima di ogni decisione.",
+    },
+    "en": {
+        "nd": "N/A", "mld": "bn", "mln": "mn",
+        "av_prezzo": "Price not available.",
+        "av_fcf": "Free cash flow not available: the ratios that use it are not calculated.",
+        "av_valuta": "The price is in {v} and the financial statements in {vb}: free cash flow yield and multiple are not calculated.",
+        "cassa_netta": "Net cash", "fcf_neg": "FCF not positive", "anni_fcf": "years of FCF",
+        "margine_netto": "Net margin", "margine_op": "Operating margin", "roe": "ROE",
+        "crescita": "Revenue growth (quarter on year)", "fcf": "Free cash flow", "cassa": "Cash",
+        "debito": "Total debt", "debito_netto": "Net debt", "dn_fcf": "Net debt to FCF",
+        "mcap": "Market cap", "ev": "Enterprise value (EV)", "pe_fwd": "Forward P/E",
+        "pe_trail": "Trailing P/E", "ev_ebitda": "EV / EBITDA", "p_fcf": "Price / free cash flow",
+        "fcf_yield": "Free cash flow yield", "upside": "Upside to mean target",
+        "prezzo": "Price", "range52": "52-week low / high", "range_target": "Target low / mean / high",
+        "ag_azienda": "Company", "ag_settore": "Sector", "ag_industria": "Industry", "ag_mcap": "Market cap",
+        "ag_52": "52-week range", "ag_target": "Analyst targets (low / mean / high)",
+        "ag_upside": "Upside to mean target", "ag_pfcf": "Price/FCF", "ag_yield": "FCF yield",
+        "ag_crescita": "Revenue growth (quarter on year)", "ag_dnfcf": "Net debt / FCF (years)",
+        "ag_avvisi": "Data notices",
+        "ag_nota": "Ratios are already computed by the system: do not recalculate them.",
+        "dato_nd": "Data not available.", "intervalli_nd": "Price ranges not available.",
+        "ultime52": "Last 52 weeks", "target_analisti": "Analyst targets",
+        "nota_valori": "Values in {v}. The vertical line is the current price.",
+        "nota_target": " The dark mark is the mean target ({t}{up}{n}).",
+        "up_sul_prezzo": ", {x} vs. price", "n_analisti": ", {n} analysts",
+        "tv_titolo": "Price history", "tv_nd": "Price history not available.",
+        "tv_offline": "Chart not available: an internet connection is required.",
+        "tv_prezzo": "Price {x}", "tv_target": "Mean target {x}", "tv_tmin": "Target low {x}", "tv_tmax": "Target high {x}",
+        "tv_1a": "1Y", "tv_2a": "2Y",
+        "tv_f50": "50-day average", "tv_f200": "200-day average", "tv_fprezzo": "price",
+        "tv_fdist": "Distance from mean target", "tv_fmax": "From 52-week high", "tv_fmin": "From 52-week low",
+        "tv_nota": ("Values in {v}. Blue band: range of analyst targets. "
+                    "Solid blue line: mean target. Dotted black line: current price. "
+                    "Orange line: 50-day average. Purple line: 200-day average. "
+                    "Prices from Yahoo Finance, unofficial source."),
+        "html_lang": "en", "titolo_report": "Committee report", "data_fmt": "%d %b %Y",
+        "report_del": "Report dated {d}", "dati_alle": "Data as of {t}",
+        "settore_nd": "Sector not available",
+        "h_prezzo_target": "Price and target", "h_bull": "Bull case", "h_bear": "Bear case",
+        "h_qualita": "Quality and strength", "h_valutazione": "Valuation",
+        "h_contabile": "Accounting analysis", "h_macro": "Macro and sector context",
+        "f_note": "Data notes", "f_fonti": "Sources and method", "f_avvert": "Disclaimer",
+        "f_fonti1": "Market and financial statement data: Yahoo Finance via yfinance, unofficial source. Ratios, moving averages and distances are calculated by the system.",
+        "f_fonti2": "The analysis sections are written by independent language models and may contain errors.",
+        "f_modello": " Language model used: {m}.",
+        "f_avvert1": "General analysis document for information purposes only. It does not constitute investment advice, a personal recommendation or a solicitation to buy or sell financial instruments.",
+        "f_avvert2": "Past results are not indicative of future results. Verify the figures against the company&rsquo;s official documents before making any decision.",
+    },
+}
+
+
+def _imposta(lang):
+    """Imposta la lingua corrente ('it' o 'en'); None lascia quella attuale."""
+    if lang in STR:
+        _LANG.set(lang)
+
+
+def _t(chiave: str) -> str:
+    return STR[_LANG.get()][chiave]
+
+
+def _nd() -> str:
+    return _t("nd")
 
 
 # ------------------------------------------------------------------ numeri
@@ -27,37 +151,39 @@ def _num(v):
 
 
 def _it(x, dec=2):
-    """Formato italiano: 1.234,56."""
+    """Formato numerico della lingua corrente: 1.234,56 (it) oppure 1,234.56 (en)."""
     s = f"{x:,.{dec}f}"
-    return s.replace(",", "§").replace(".", ",").replace("§", ".")
+    if _LANG.get() == "it":
+        return s.replace(",", "§").replace(".", ",").replace("§", ".")
+    return s
 
 
 def fmt_prezzo(v, valuta):
     x = _num(v)
-    return ND if x is None else f"{_it(x)} {valuta}"
+    return _nd() if x is None else f"{_it(x)} {valuta}"
 
 
 def fmt_pct(v, dec=1, segno=False):
     x = _num(v)
     if x is None:
-        return ND
+        return _nd()
     s = _it(x * 100, dec)
     return ("+" + s if segno and x > 0 else s) + "%"
 
 
 def fmt_x(v, dec=1):
     x = _num(v)
-    return ND if x is None else f"{_it(x, dec)}x"
+    return _nd() if x is None else f"{_it(x, dec)}x"
 
 
 def fmt_grande(v, valuta):
     x = _num(v)
     if x is None:
-        return ND
+        return _nd()
     if abs(x) >= 1e9:
-        n, unita = x / 1e9, "mld"
+        n, unita = x / 1e9, _t("mld")
     elif abs(x) >= 1e6:
-        n, unita = x / 1e6, "mln"
+        n, unita = x / 1e6, _t("mln")
     else:
         return f"{_it(x, 0)} {valuta}"
     return f"{_it(n, 1 if abs(n) < 100 else 0)} {unita} {valuta}"
@@ -65,9 +191,10 @@ def fmt_grande(v, valuta):
 
 # ---------------------------------------------------------------- metriche
 
-def calcola_metriche(info: dict) -> dict:
+def calcola_metriche(info: dict, lang: str = None) -> dict:
     """Ricava dai dati grezzi di Yahoo Finance i rapporti che NON devono
     essere calcolati dal modello linguistico."""
+    _imposta(lang)
     g = lambda k: _num(info.get(k))  # noqa: E731
 
     valuta = info.get("currency") or "USD"
@@ -99,14 +226,11 @@ def calcola_metriche(info: dict) -> dict:
 
     avvisi = []
     if prezzo is None:
-        avvisi.append("Prezzo non disponibile.")
+        avvisi.append(_t("av_prezzo"))
     if fcf is None:
-        avvisi.append("Free cash flow non disponibile: i rapporti che lo usano non sono calcolati.")
+        avvisi.append(_t("av_fcf"))
     if not stessa_valuta:
-        avvisi.append(
-            f"Il prezzo è in {valuta} e il bilancio in {valuta_bilancio}: "
-            "rendimento e multiplo sul free cash flow non sono calcolati."
-        )
+        avvisi.append(_t("av_valuta").format(v=valuta, vb=valuta_bilancio))
 
     return {
         "valuta": valuta,
@@ -144,52 +268,53 @@ def calcola_metriche(info: dict) -> dict:
 def _ratio_debito(m):
     dn = m["debito_netto"]
     if dn is None:
-        return ND
+        return _nd()
     if dn <= 0:
-        return "Cassa netta"
+        return _t("cassa_netta")
     if m["fcf"] is not None and m["fcf"] <= 0:
-        return "FCF non positivo"
+        return _t("fcf_neg")
     if m["debito_netto_su_fcf"] is None:
-        return ND
-    return f"{_it(m['debito_netto_su_fcf'], 1)} anni di FCF"
+        return _nd()
+    return f"{_it(m['debito_netto_su_fcf'], 1)} {_t('anni_fcf')}"
 
 
 def righe_qualita(m):
     vb = m["valuta_bilancio"]
     return [
-        ("Margine netto", fmt_pct(m["margine_netto"])),
-        ("Margine operativo", fmt_pct(m["margine_op"])),
-        ("ROE", fmt_pct(m["roe"])),
-        ("Crescita ricavi (trimestre su anno)", fmt_pct(m["crescita_ricavi"], segno=True)),
-        ("Free cash flow", fmt_grande(m["fcf"], vb)),
-        ("Cassa", fmt_grande(m["cassa"], vb)),
-        ("Debito totale", fmt_grande(m["debito"], vb)),
-        ("Debito netto", fmt_grande(m["debito_netto"], vb)),
-        ("Debito netto rispetto al FCF", _ratio_debito(m)),
+        (_t("margine_netto"), fmt_pct(m["margine_netto"])),
+        (_t("margine_op"), fmt_pct(m["margine_op"])),
+        (_t("roe"), fmt_pct(m["roe"])),
+        (_t("crescita"), fmt_pct(m["crescita_ricavi"], segno=True)),
+        (_t("fcf"), fmt_grande(m["fcf"], vb)),
+        (_t("cassa"), fmt_grande(m["cassa"], vb)),
+        (_t("debito"), fmt_grande(m["debito"], vb)),
+        (_t("debito_netto"), fmt_grande(m["debito_netto"], vb)),
+        (_t("dn_fcf"), _ratio_debito(m)),
     ]
 
 
 def righe_valutazione(m):
     v = m["valuta"]
     return [
-        ("Capitalizzazione", fmt_grande(m["mcap"], v)),
-        ("Valore d'impresa (EV)", fmt_grande(m["ev"], v)),
-        ("P/E atteso (forward)", fmt_x(m["pe_fwd"])),
-        ("P/E storico (trailing)", fmt_x(m["pe_trail"])),
-        ("EV / EBITDA", fmt_x(m["ev_ebitda"])),
-        ("Prezzo / free cash flow", fmt_x(m["p_fcf"])),
-        ("Rendimento da free cash flow", fmt_pct(m["fcf_yield"])),
-        ("Potenziale rispetto al target medio", fmt_pct(m["upside"], segno=True)),
+        (_t("mcap"), fmt_grande(m["mcap"], v)),
+        (_t("ev"), fmt_grande(m["ev"], v)),
+        (_t("pe_fwd"), fmt_x(m["pe_fwd"])),
+        (_t("pe_trail"), fmt_x(m["pe_trail"])),
+        (_t("ev_ebitda"), fmt_x(m["ev_ebitda"])),
+        (_t("p_fcf"), fmt_x(m["p_fcf"])),
+        (_t("fcf_yield"), fmt_pct(m["fcf_yield"])),
+        (_t("upside"), fmt_pct(m["upside"], segno=True)),
     ]
 
 
-def tabella_metriche(m):
+def tabella_metriche(m, lang: str = None):
     """Elenco (voce, valore) mostrato nella scheda 'Dati usati'."""
+    _imposta(lang)
     righe = righe_valutazione(m) + righe_qualita(m)
-    righe.append(("Prezzo", fmt_prezzo(m["prezzo"], m["valuta"])))
-    righe.append(("Minimo / massimo 52 settimane",
+    righe.append((_t("prezzo"), fmt_prezzo(m["prezzo"], m["valuta"])))
+    righe.append((_t("range52"),
                   f"{fmt_prezzo(m['min52'], m['valuta'])} / {fmt_prezzo(m['max52'], m['valuta'])}"))
-    righe.append(("Target minimo / medio / massimo",
+    righe.append((_t("range_target"),
                   " / ".join(fmt_prezzo(m[k], m["valuta"]) for k in ("target_min", "target", "target_max"))))
     return righe
 
@@ -198,37 +323,242 @@ def tabella_metriche(m):
 
 def _raw(x, dec=2, pct=False):
     if x is None:
-        return ND
+        return _nd()
     return f"{x * 100:.{dec}f}%" if pct else f"{x:.{dec}f}"
 
 
 def _mld(x):
-    return ND if x is None else f"{x / 1e9:.2f} mld"
+    return _nd() if x is None else f"{x / 1e9:.2f} {_t('mld')}"
 
 
-def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict) -> str:
+def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict, lang: str = None) -> str:
     """Scheda dati consegnata a tutti gli analisti. I rapporti sono già
     calcolati: gli agenti non devono rifarli."""
+    _imposta(lang)
     v, vb = m["valuta"], m["valuta_bilancio"]
     righe = [
-        f"Azienda: {nome} ({ticker})",
-        f"Settore: {info.get('sector') or ND} | Industria: {info.get('industry') or ND}",
-        f"Prezzo: {_raw(m['prezzo'])} {v} | Capitalizzazione: {_mld(m['mcap'])} {v}",
-        f"Intervallo 52 settimane: {_raw(m['min52'])} - {_raw(m['max52'])} {v}",
-        f"Target analisti (min / medio / max): {_raw(m['target_min'])} / {_raw(m['target'])} / {_raw(m['target_max'])} {v}"
-        f" | Potenziale sul target medio: {_raw(m['upside'], 1, pct=True)}",
+        f"{_t('ag_azienda')}: {nome} ({ticker})",
+        f"{_t('ag_settore')}: {info.get('sector') or _nd()} | {_t('ag_industria')}: {info.get('industry') or _nd()}",
+        f"{_t('prezzo')}: {_raw(m['prezzo'])} {v} | {_t('ag_mcap')}: {_mld(m['mcap'])} {v}",
+        f"{_t('ag_52')}: {_raw(m['min52'])} - {_raw(m['max52'])} {v}",
+        f"{_t('ag_target')}: {_raw(m['target_min'])} / {_raw(m['target'])} / {_raw(m['target_max'])} {v}"
+        f" | {_t('ag_upside')}: {_raw(m['upside'], 1, pct=True)}",
         f"P/E forward: {_raw(m['pe_fwd'], 1)} | P/E trailing: {_raw(m['pe_trail'], 1)} | EV/EBITDA: {_raw(m['ev_ebitda'], 1)}",
-        f"Prezzo/FCF: {_raw(m['p_fcf'], 1)} | Rendimento da FCF: {_raw(m['fcf_yield'], 1, pct=True)}",
-        f"Margine netto: {_raw(m['margine_netto'], 1, pct=True)} | Margine operativo: {_raw(m['margine_op'], 1, pct=True)}"
+        f"{_t('ag_pfcf')}: {_raw(m['p_fcf'], 1)} | {_t('ag_yield')}: {_raw(m['fcf_yield'], 1, pct=True)}",
+        f"{_t('margine_netto')}: {_raw(m['margine_netto'], 1, pct=True)} | {_t('margine_op')}: {_raw(m['margine_op'], 1, pct=True)}"
         f" | ROE: {_raw(m['roe'], 1, pct=True)}",
-        f"Crescita ricavi (trimestre su anno): {_raw(m['crescita_ricavi'], 1, pct=True)}",
-        f"Free cash flow: {_mld(m['fcf'])} {vb} | Cassa: {_mld(m['cassa'])} {vb} | Debito totale: {_mld(m['debito'])} {vb}",
-        f"Debito netto: {_mld(m['debito_netto'])} {vb} | Debito netto / FCF (anni): {_raw(m['debito_netto_su_fcf'], 2)}",
+        f"{_t('ag_crescita')}: {_raw(m['crescita_ricavi'], 1, pct=True)}",
+        f"{_t('fcf')}: {_mld(m['fcf'])} {vb} | {_t('cassa')}: {_mld(m['cassa'])} {vb} | {_t('debito')}: {_mld(m['debito'])} {vb}",
+        f"{_t('debito_netto')}: {_mld(m['debito_netto'])} {vb} | {_t('ag_dnfcf')}: {_raw(m['debito_netto_su_fcf'], 2)}",
     ]
     if m["avvisi"]:
-        righe.append("Avvisi sui dati: " + " ".join(m["avvisi"]))
-    righe.append("I rapporti sono già calcolati dal sistema: non rifare i calcoli.")
+        righe.append(f"{_t('ag_avvisi')}: " + " ".join(m["avvisi"]))
+    righe.append(_t("ag_nota"))
     return "\n".join(righe)
+
+
+# ------------------------------------------- grafico TradingView (solo a schermo)
+
+def _media_mobile(valori, n):
+    """Media mobile semplice: None finché non ci sono n valori."""
+    out = [None] * len(valori)
+    if len(valori) < n:
+        return out
+    somma = sum(valori[:n])
+    out[n - 1] = somma / n
+    for i in range(n, len(valori)):
+        somma += valori[i] - valori[i - n]
+        out[i] = somma / n
+    return out
+
+
+_TV_CSS = """
+<style>
+.tv-barra{display:flex;gap:6px;margin:0 0 8px}
+.tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
+.tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
+.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
+background:rgba(29,78,110,.10);border-top:1px solid rgba(29,78,110,.30);border-bottom:1px solid rgba(29,78,110,.30)}
+.tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
+.tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
+@media print{.tv{display:none}}
+</style>
+"""
+
+_TV_JS = """
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function(){
+  var D = __DATI__;
+  var box = document.getElementById('tv-chart');
+  if (typeof LightweightCharts === 'undefined') {
+    box.innerHTML = '<p class="nd" style="padding:12px"></p>'; box.firstChild.textContent = D.msg;
+    return;
+  }
+  var chart = LightweightCharts.createChart(box, {
+    width: box.clientWidth, height: 320,
+    layout: {background: {type: 'solid', color: '#ffffff'}, textColor: '#566273', fontSize: 11,
+             fontFamily: '"Segoe UI","Helvetica Neue",Arial,sans-serif'},
+    grid: {vertLines: {color: '#eef0f3'}, horzLines: {color: '#eef0f3'}},
+    rightPriceScale: {borderColor: '#d6dbe2', scaleMargins: {top: 0.08, bottom: 0.08}},
+    timeScale: {borderColor: '#d6dbe2'},
+    crosshair: {mode: 0}
+  });
+  var L = D.livelli;
+  var estremi = [L.tmin, L.tmax, L.target].filter(function(x){ return x !== null; });
+  var cs = chart.addCandlestickSeries({
+    upColor: '#2b7a57', downColor: '#a8412f', borderVisible: false,
+    wickUpColor: '#2b7a57', wickDownColor: '#a8412f',
+    lastValueVisible: false, priceLineVisible: false,
+    autoscaleInfoProvider: function(orig) {
+      var r = orig();
+      if (r !== null && estremi.length) {
+        r.priceRange.minValue = Math.min(r.priceRange.minValue, Math.min.apply(null, estremi));
+        r.priceRange.maxValue = Math.max(r.priceRange.maxValue, Math.max.apply(null, estremi));
+      }
+      return r;
+    }
+  });
+  cs.setData(D.candele);
+
+  function media(dati, colore) {
+    if (!dati.length) return;
+    var s = chart.addLineSeries({color: colore, lineWidth: 1, lastValueVisible: false,
+                                 priceLineVisible: false, crosshairMarkerVisible: false});
+    s.setData(dati);
+  }
+  media(D.sma50, '#c98a1b');
+  media(D.sma200, '#6b4c9a');
+
+  function linea(prezzo, titolo, colore, stile, spessore) {
+    if (prezzo === null) return;
+    cs.createPriceLine({price: prezzo, color: colore, lineWidth: spessore, lineStyle: stile,
+                        axisLabelVisible: true, title: titolo});
+  }
+  linea(L.tmax, D.et.tmax, '#1d4e6e', 2, 1);
+  linea(L.tmin, D.et.tmin, '#1d4e6e', 2, 1);
+  linea(L.target, D.et.target, '#1d4e6e', 0, 2);
+  linea(L.prezzo, D.et.prezzo, '#17202b', 1, 1);
+
+  var banda = null;
+  if (L.tmin !== null && L.tmax !== null) {
+    banda = document.createElement('div');
+    banda.className = 'tv-banda';
+    box.appendChild(banda);
+  }
+  function aggiorna() {
+    if (banda) {
+      var y1 = cs.priceToCoordinate(L.tmax), y2 = cs.priceToCoordinate(L.tmin);
+      if (y1 === null || y2 === null) {
+        banda.style.display = 'none';
+      } else {
+        banda.style.display = 'block';
+        banda.style.top = Math.min(y1, y2) + 'px';
+        banda.style.height = Math.abs(y2 - y1) + 'px';
+        banda.style.width = chart.timeScale().width() + 'px';
+      }
+    }
+    requestAnimationFrame(aggiorna);
+  }
+  aggiorna();
+
+  function intervallo(giorni) {
+    var ts = chart.timeScale();
+    if (!giorni) { ts.fitContent(); return; }
+    var ult = D.candele[D.candele.length - 1].time;
+    var d = new Date(ult + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - giorni);
+    try { ts.setVisibleRange({from: d.toISOString().slice(0, 10), to: ult}); }
+    catch (e) { ts.fitContent(); }
+  }
+  var bottoni = document.querySelectorAll('.tv-barra button');
+  Array.prototype.forEach.call(bottoni, function(b) {
+    b.addEventListener('click', function() {
+      Array.prototype.forEach.call(bottoni, function(x){ x.classList.remove('on'); });
+      b.classList.add('on');
+      intervallo(parseInt(b.getAttribute('data-g'), 10));
+    });
+  });
+  intervallo(365);
+
+  function adatta() { chart.applyOptions({width: box.clientWidth}); }
+  if (typeof ResizeObserver !== 'undefined') { new ResizeObserver(adatta).observe(box); }
+  window.addEventListener('resize', adatta);
+})();
+</script>
+"""
+
+
+def grafico_tradingview(ticker: str, storico, m: dict, lang: str = None) -> str:
+    """Sezione HTML con il grafico (Lightweight Charts di TradingView) per
+    l'uso a schermo. `storico` è una lista di dict con time (AAAA-MM-GG),
+    open, high, low, close. Sul grafico si sovrappongono i livelli del
+    report: target medio, fascia min-max dei target e prezzo attuale. Medie
+    mobili e distanze sono calcolate qui, non dai modelli linguistici."""
+    _imposta(lang)
+    if not storico or len(storico) < 20:
+        return (
+            f'<section class="tv"><h2>{_t("tv_titolo")}</h2>'
+            f'<p class="nd">{_t("tv_nd")}</p></section>'
+        )
+
+    v = m["valuta"]
+    chiusure = [r["close"] for r in storico]
+    s50 = _media_mobile(chiusure, 50)
+    s200 = _media_mobile(chiusure, 200)
+
+    def serie(ms):
+        return [{"time": r["time"], "value": round(x, 4)} for r, x in zip(storico, ms) if x is not None]
+
+    prezzo = m["prezzo"] if m["prezzo"] is not None else chiusure[-1]
+    et = {
+        "prezzo": _t("tv_prezzo").format(x=_it(prezzo)),
+        "target": _t("tv_target").format(x=_it(m["target"])) if m["target"] is not None else "",
+        "tmin": _t("tv_tmin").format(x=_it(m["target_min"])) if m["target_min"] is not None else "",
+        "tmax": _t("tv_tmax").format(x=_it(m["target_max"])) if m["target_max"] is not None else "",
+    }
+    dati = {
+        "candele": [{k: r[k] for k in ("time", "open", "high", "low", "close")} for r in storico],
+        "sma50": serie(s50),
+        "sma200": serie(s200),
+        "livelli": {
+            "prezzo": prezzo,
+            "target": m["target"],
+            "tmin": m["target_min"],
+            "tmax": m["target_max"],
+        },
+        "et": et,
+        "msg": _t("tv_offline"),
+    }
+    dati_js = json.dumps(dati).replace("</", "<\\/")
+
+    fatti = []
+    if s50[-1]:
+        fatti.append(f"{_t('tv_f50')} <b>{_it(s50[-1])}</b> ({_t('tv_fprezzo')} {fmt_pct(prezzo / s50[-1] - 1, segno=True)})")
+    if s200[-1]:
+        fatti.append(f"{_t('tv_f200')} <b>{_it(s200[-1])}</b> ({_t('tv_fprezzo')} {fmt_pct(prezzo / s200[-1] - 1, segno=True)})")
+    if m["upside"] is not None:
+        fatti.append(f"{_t('tv_fdist')} <b>{fmt_pct(m['upside'], segno=True)}</b>")
+    if m["max52"]:
+        fatti.append(f"{_t('tv_fmax')} <b>{fmt_pct(prezzo / m['max52'] - 1, segno=True)}</b>")
+    if m["min52"]:
+        fatti.append(f"{_t('tv_fmin')} <b>{fmt_pct(prezzo / m['min52'] - 1, segno=True)}</b>")
+    righe_fatti = "".join(f"<span>{f}</span>" for f in fatti)
+
+    nota = html.escape(_t("tv_nota").format(v=v))
+
+    return (
+        '<section class="tv">' + _TV_CSS
+        + f"<h2>{_t('tv_titolo')}</h2>"
+        + '<div class="tv-barra"><button data-g="90">3M</button><button data-g="180">6M</button>'
+        f'<button data-g="365" class="on">{_t("tv_1a")}</button><button data-g="0">{_t("tv_2a")}</button></div>'
+        + '<div class="tv-box" id="tv-chart"></div>'
+        + f'<p class="nota">{nota}</p>'
+        + (f'<div class="tv-fatti">{righe_fatti}</div>' if righe_fatti else "")
+        + _TV_JS.replace("__DATI__", dati_js)
+        + "</section>"
+    )
 
 
 # --------------------------------------------------------------------- HTML
@@ -236,7 +566,7 @@ def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict) -> str:
 def testo_html(testo) -> str:
     """Testo del modello -> HTML sicuro (escape, elenchi puntati, grassetto)."""
     if not testo:
-        return '<p class="nd">Dato non disponibile.</p>'
+        return f'<p class="nd">{_t("dato_nd")}</p>'
     pulito = re.sub(r"<think>.*?</think>", "", str(testo), flags=re.S).strip()
     blocchi, voci = [], []
 
@@ -261,7 +591,7 @@ def testo_html(testo) -> str:
 def _tabella(righe) -> str:
     celle = []
     for etichetta, valore in righe:
-        classe = ' class="nd"' if valore == ND else ""
+        classe = ' class="nd"' if valore == _nd() else ""
         celle.append(
             f"<tr><th>{html.escape(etichetta)}</th><td{classe}>{html.escape(valore)}</td></tr>"
         )
@@ -286,13 +616,13 @@ def _scala(m):
 def _grafico_prezzo(m) -> str:
     pos = _scala(m)
     if pos is None:
-        return '<p class="nd">Intervalli di prezzo non disponibili.</p>'
+        return f'<p class="nd">{_t("intervalli_nd")}</p>'
     v = m["valuta"]
     righe = []
     if m["min52"] is not None and m["max52"] is not None:
         a, b = pos(m["min52"]), pos(m["max52"])
         righe.append(
-            '<div class="lrow"><div class="ll"><span>Ultime 52 settimane</span>'
+            f'<div class="lrow"><div class="ll"><span>{_t("ultime52")}</span>'
             f'<span class="num">{_it(m["min52"])} &ndash; {_it(m["max52"])}</span></div>'
             f'<div class="track"><div class="fill" style="left:{a:.1f}%;width:{b - a:.1f}%"></div></div></div>'
         )
@@ -300,7 +630,7 @@ def _grafico_prezzo(m) -> str:
         a, b = pos(m["target_min"]), pos(m["target_max"])
         tick = f'<div class="tick" style="left:{pos(m["target"]):.1f}%"></div>' if m["target"] is not None else ""
         righe.append(
-            '<div class="lrow"><div class="ll"><span>Target degli analisti</span>'
+            f'<div class="lrow"><div class="ll"><span>{_t("target_analisti")}</span>'
             f'<span class="num">{_it(m["target_min"])} &ndash; {_it(m["target_max"])}</span></div>'
             f'<div class="track"><div class="fill t" style="left:{a:.1f}%;width:{b - a:.1f}%"></div>{tick}</div></div>'
         )
@@ -310,12 +640,10 @@ def _grafico_prezzo(m) -> str:
     n = m["n_analisti"]
     dettaglio_target = ""
     if m["target"] is not None:
-        quanti = f", {int(n)} analisti" if n else ""
-        dettaglio_target = (
-            f" Il segno scuro è il target medio ({fmt_prezzo(m['target'], v)}"
-            f"{', ' + fmt_pct(m['upside'], segno=True) + ' sul prezzo' if m['upside'] is not None else ''}{quanti})."
-        )
-    nota = f'<p class="nota">Valori in {html.escape(v)}. La linea verticale è il prezzo attuale.{html.escape(dettaglio_target)}</p>'
+        quanti = _t("n_analisti").format(n=int(n)) if n else ""
+        sul_prezzo = _t("up_sul_prezzo").format(x=fmt_pct(m["upside"], segno=True)) if m["upside"] is not None else ""
+        dettaglio_target = _t("nota_target").format(t=fmt_prezzo(m["target"], v), up=sul_prezzo, n=quanti)
+    nota = f'<p class="nota">{html.escape(_t("nota_valori").format(v=v) + dettaglio_target)}</p>'
     return f'<div class="ladder"><div class="axis">{linea}{"".join(righe)}</div>{nota}</div>'
 
 
@@ -329,6 +657,9 @@ body{margin:0;padding:24px 12px;background:var(--wash);color:var(--ink);font:12.
 header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;
 border-bottom:2px solid var(--ink);padding-bottom:12px}
 h1{font:700 28px/1.15 var(--serif);margin:0}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:52px;height:52px;object-fit:contain;border:1px solid var(--rule);padding:5px;background:#fff;flex:none}
+.mono{width:52px;height:52px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;font:700 19px var(--serif);letter-spacing:.02em}
 .sotto{color:var(--slate);margin-top:4px}
 .data{text-align:right;color:var(--slate);font-size:11.5px;white-space:nowrap}
 h2{font:700 15px/1.3 var(--serif);margin:0 0 8px}
@@ -359,71 +690,277 @@ table.kv{width:100%;border-collapse:collapse}
 .kv td{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kv td.nd{font-weight:400}
 .kv tr:last-child th,.kv tr:last-child td{border-bottom:0}
-footer{margin-top:22px;border-top:1px solid var(--rule);padding-top:10px;color:var(--slate);font-size:10.5px;line-height:1.5}
+footer{margin-top:26px;border-top:2px solid var(--ink);padding-top:12px;color:var(--slate);font-size:10.5px;line-height:1.55}
+.foot{display:grid;grid-template-columns:1fr 1fr;gap:34px}
+footer h3{font:700 9.5px/1.3 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--ink);margin:0 0 5px}
 footer p{margin:0 0 4px}
+.foot-note{margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--rule)}
 @page{size:A4;margin:11mm}
-@media print{body{background:#fff;padding:0}.page{border:0;max-width:none;padding:0}section{break-inside:avoid}}
-@media (max-width:640px){.cols{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.data{text-align:left}}
+@media print{body{background:#fff;padding:0}.page{border:0;max-width:none;padding:0}section,footer{break-inside:avoid}}
+@media (max-width:640px){.cols,.foot{grid-template-columns:1fr}header{flex-direction:column;align-items:flex-start}.data{text-align:left}}
 """
 
 
-def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "") -> str:
-    """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro."""
+# --- FUNZIONI PER IL GRAFICO STATICO E IL PDF ---
+
+def genera_grafico_statico_png(storico: list, m: dict) -> str:
+    """Genera un grafico a candele statico in base64 per il PDF."""
+    if not storico or len(storico) < 20:
+        return ""
+    
+    df = pd.DataFrame(storico)
+    df['time'] = pd.to_datetime(df['time'])
+    
+    fig, ax = plt.subplots(figsize=(8, 3.2)) # Formato perfetto per A4
+    
+    up = df[df.close >= df.open]
+    down = df[df.close < df.open]
+    
+    # Candele verdi
+    col1 = '#2b7a57'
+    ax.vlines(up.time, up.low, up.high, color=col1, linewidth=1)
+    ax.bar(up.time, up.close - up.open, bottom=up.open, color=col1, width=1.0, align='center')
+    
+    # Candele rosse
+    col2 = '#a8412f'
+    ax.vlines(down.time, down.low, down.high, color=col2, linewidth=1)
+    ax.bar(down.time, down.close - down.open, bottom=down.open, color=col2, width=1.0, align='center')
+    
+    # Linee target e prezzo
+    if m.get('target'):
+        ax.axhline(m['target'], color='#1d4e6e', linestyle='-', linewidth=1.5, label='Target Medio')
+    if m.get('prezzo'):
+        ax.axhline(m['prezzo'], color='#17202b', linestyle='--', linewidth=1, label='Prezzo Attuale')
+        
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#d6dbe2')
+    ax.spines['bottom'].set_color('#d6dbe2')
+    ax.tick_params(colors='#566273', labelsize=8)
+    ax.grid(True, linestyle='--', alpha=0.3)
+    ax.set_facecolor('#ffffff')
+    fig.patch.set_facecolor('#ffffff')
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
+    
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png', dpi=150)
+    plt.close(fig)
+    
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode('utf-8')
+    return f"data:image/png;base64,{img_b64}"
+
+
+def genera_pdf_da_html(html_content: str) -> bytes:
+    """Converte l'HTML in PDF usando Playwright (Chromium invisibile)."""
+    from playwright.sync_api import sync_playwright
+    import time
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        
+        # Carica il codice HTML
+        page.set_content(html_content, wait_until="networkidle")
+        
+        # Aspetta un attimo per sicurezza (es. per le immagini base64)
+        time.sleep(0.5)
+        
+        # Genera il PDF (formato A4)
+        pdf_bytes = page.pdf(
+            format="A4",
+            print_background=True, # Importante: stampa i colori di sfondo!
+            margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
+        )
+        browser.close()
+        return pdf_bytes
+
+# -------------------------------------------------------
+
+def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", 
+                  grafico: str = "", grafico_statico: str = "", adatta_iframe: bool = False,
+                  lang: str = None, logo: str = "") -> str:
+    """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro.
+    `grafico` è HTML facoltativo inserito sotto 'Prezzo e target' (solo schermo).
+    `grafico_statico` è un'immagine base64 per il PDF.
+    `logo` è un URL o data-URI facoltativo; se manca compare un monogramma."""
+    _imposta(lang)
     esc = html.escape
 
     borsa = info.get("fullExchangeName") or info.get("exchange") or ""
     sigla = f"{borsa}: {ticker}" if borsa else ticker
-    settore = ", ".join(x for x in (info.get("sector"), info.get("industry")) if x) or "Settore non disponibile"
+    settore = ", ".join(x for x in (info.get("sector"), info.get("industry")) if x) or _t("settore_nd")
 
-    avvisi = "".join(f"<p>{esc(a)}</p>" for a in m["avvisi"])
-    modello_txt = f" Modello linguistico: {esc(modello)}." if modello else ""
+    note_dati = (
+        f'<div class="foot-note"><h3>{_t("f_note")}</h3>'
+        + "".join(f"<p>{esc(a)}</p>" for a in m["avvisi"])
+        + "</div>"
+        if m["avvisi"]
+        else ""
+    )
+    modello_txt = _t("f_modello").format(m=esc(modello)) if modello else ""
+    iniziali = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", nome)[:2]).upper() or ticker[:2]
+    marchio = (
+        f'<img class="logo" src="{esc(logo, quote=True)}" alt="">' if logo
+        else f'<div class="mono">{esc(iniziali)}</div>'
+    )
+    
+    # Usa il grafico statico se presente (per il PDF), altrimenti quello interattivo
+    blocco_grafico = f'<img src="{grafico_statico}" style="width:100%; height:auto; border:1px solid var(--rule); border-radius:4px; margin-top:10px;" alt="Grafico">' if grafico_statico else grafico
+
+    # Solo per la vista a schermo: la finestra si adatta all'altezza del report.
+    script_altezza = (
+        "<script>(function(){function a(){try{var f=window.frameElement;"
+        "if(f){f.style.height=document.body.offsetHeight+'px';}}catch(e){}}"
+        "window.addEventListener('load',a);"
+        "if(typeof ResizeObserver!=='undefined'){new ResizeObserver(a).observe(document.body);}a();})();</script>"
+        if adatta_iframe
+        else ""
+    )
 
     return f"""<!DOCTYPE html>
-<html lang="it">
+<html lang="{_t('html_lang')}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(nome)} ({esc(ticker)}) - Report del comitato</title>
+<title>{esc(nome)} ({esc(ticker)}) - {_t('titolo_report')}</title>
 <style>{CSS}</style>
 </head>
 <body>
 <div class="page">
 <header>
-  <div>
-    <h1>{esc(nome)}</h1>
-    <div class="sotto">{esc(sigla)}. {esc(settore)}.</div>
+  <div class="brand">
+    {marchio}
+    <div>
+      <h1>{esc(nome)}</h1>
+      <div class="sotto">{esc(sigla)}. {esc(settore)}.</div>
+    </div>
   </div>
-  <div class="data">Report del {time.strftime('%d/%m/%Y')}<br>Dati aggiornati alle {time.strftime('%H:%M')}</div>
+  <div class="data">{_t('report_del').format(d=time.strftime(_t('data_fmt')))}<br>{_t('dati_alle').format(t=time.strftime('%H:%M'))}</div>
 </header>
 
 <section>
-  <h2>Prezzo e target</h2>
+  <h2>{_t('h_prezzo_target')}</h2>
   {_grafico_prezzo(m)}
 </section>
 
+{blocco_grafico}
+
 <section class="cols">
-  <div class="tesi bull"><h2>Tesi rialzista</h2><div class="testo">{testo_html(s.get('bull'))}</div></div>
-  <div class="tesi bear"><h2>Tesi ribassista</h2><div class="testo">{testo_html(s.get('bear'))}</div></div>
+  <div class="tesi bull"><h2>{_t('h_bull')}</h2><div class="testo">{testo_html(s.get('bull'))}</div></div>
+  <div class="tesi bear"><h2>{_t('h_bear')}</h2><div class="testo">{testo_html(s.get('bear'))}</div></div>
 </section>
 
 <section class="cols">
-  <div><h2>Qualità e solidità</h2>{_tabella(righe_qualita(m))}</div>
-  <div><h2>Valutazione</h2>{_tabella(righe_valutazione(m))}</div>
+  <div><h2>{_t('h_qualita')}</h2>{_tabella(righe_qualita(m))}</div>
+  <div><h2>{_t('h_valutazione')}</h2>{_tabella(righe_valutazione(m))}</div>
 </section>
 
 <section class="cols">
-  <div><h2>Analisi contabile</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
-  <div><h2>Contesto macro e di settore</h2><div class="testo">{testo_html(s.get('macro'))}</div></div>
+  <div><h2>{_t('h_contabile')}</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
+  <div><h2>{_t('h_macro')}</h2><div class="testo">{testo_html(s.get('macro'))}</div></div>
 </section>
 
 <footer>
-  {avvisi}
-  <p>Dati di mercato e di bilancio da Yahoo Finance tramite yfinance, fonte non ufficiale. Le sezioni di analisi sono scritte da modelli linguistici che lavorano in modo indipendente e possono contenere errori.{modello_txt}</p>
-  <p>Documento di analisi generale. Non è consulenza in materia di investimenti né una raccomandazione personalizzata. Verifica le cifre sui documenti ufficiali della società prima di decidere.</p>
+  {note_dati}
+  <div class="foot">
+    <div>
+      <h3>{_t('f_fonti')}</h3>
+      <p>{_t('f_fonti1')}</p>
+      <p>{_t('f_fonti2')}{modello_txt}</p>
+    </div>
+    <div>
+      <h3>{_t('f_avvert')}</h3>
+      <p>{_t('f_avvert1')}</p>
+      <p>{_t('f_avvert2')}</p>
+    </div>
+  </div>
 </footer>
 </div>
+{script_altezza}
 </body>
 </html>
+"""
+
+
+def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", grafico: str = "", lang: str = None, logo: str = "") -> str:
+    """Genera solo il frammento HTML del report (senza <html>, <head>, <body>)
+    per essere visualizzato in un iframe di Streamlit."""
+    _imposta(lang)
+    esc = html.escape
+
+    borsa = info.get("fullExchangeName") or info.get("exchange") or ""
+    sigla = f"{borsa}: {ticker}" if borsa else ticker
+    settore = ", ".join(x for x in (info.get("sector"), info.get("industry")) if x) or _t("settore_nd")
+
+    note_dati = (
+        f'<div class="foot-note"><h3>{_t("f_note")}</h3>'
+        + "".join(f"<p>{esc(a)}</p>" for a in m["avvisi"])
+        + "</div>"
+        if m["avvisi"]
+        else ""
+    )
+    modello_txt = _t("f_modello").format(m=esc(modello)) if modello else ""
+    iniziali = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", nome)[:2]).upper() or ticker[:2]
+    marchio = (
+        f'<img class="logo" src="{esc(logo, quote=True)}" alt="">' if logo
+        else f'<div class="mono">{esc(iniziali)}</div>'
+    )
+
+    # Il CSS è incluso nel frammento per non dipendere da quello di Streamlit
+    return f"""
+<style>{CSS}</style>
+<div class="page">
+<header>
+  <div class="brand">
+    {marchio}
+    <div>
+      <h1>{esc(nome)}</h1>
+      <div class="sotto">{esc(sigla)}. {esc(settore)}.</div>
+    </div>
+  </div>
+  <div class="data">{_t('report_del').format(d=time.strftime(_t('data_fmt')))}<br>{_t('dati_alle').format(t=time.strftime('%H:%M'))}</div>
+</header>
+
+<section>
+  <h2>{_t('h_prezzo_target')}</h2>
+  {_grafico_prezzo(m)}
+</section>
+
+{grafico}
+
+<section class="cols">
+  <div class="tesi bull"><h2>{_t('h_bull')}</h2><div class="testo">{testo_html(s.get('bull'))}</div></div>
+  <div class="tesi bear"><h2>{_t('h_bear')}</h2><div class="testo">{testo_html(s.get('bear'))}</div></div>
+</section>
+
+<section class="cols">
+  <div><h2>{_t('h_qualita')}</h2>{_tabella(righe_qualita(m))}</div>
+  <div><h2>{_t('h_valutazione')}</h2>{_tabella(righe_valutazione(m))}</div>
+</section>
+
+<section class="cols">
+  <div><h2>{_t('h_contabile')}</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
+  <div><h2>{_t('h_macro')}</h2><div class="testo">{testo_html(s.get('macro'))}</div></div>
+</section>
+
+<footer>
+  {note_dati}
+  <div class="foot">
+    <div>
+      <h3>{_t('f_fonti')}</h3>
+      <p>{_t('f_fonti1')}</p>
+      <p>{_t('f_fonti2')}{modello_txt}</p>
+    </div>
+    <div>
+      <h3>{_t('f_avvert')}</h3>
+      <p>{_t('f_avvert1')}</p>
+      <p>{_t('f_avvert2')}</p>
+    </div>
+  </div>
+</footer>
+</div>
 """
 
 
