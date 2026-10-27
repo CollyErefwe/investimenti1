@@ -295,7 +295,10 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
             fcf, cassa, debito, ebitda = conv(fcf), conv(cassa), conv(debito), conv(ebitda)
             convertito = stessa_valuta = True
         else:
-            ev, ev_ebitda = None, None  # valute miste: valori inaffidabili
+            # Valute miste senza cambio: i valori in valuta di bilancio non sono
+            # confrontabili con prezzo/mcap in valuta di quotazione.
+            ev, ev_ebitda = None, None
+            fcf, cassa, debito, ebitda = None, None, None, None
 
     debito_netto = debito - cassa if debito is not None and cassa is not None else None
     if convertito:
