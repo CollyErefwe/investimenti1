@@ -9,8 +9,12 @@ from groq import Groq
 # CONFIGURAZIONE API GROQ
 # La chiave va impostata come variabile d'ambiente GROQ_API_KEY
 # (es. in terminale: export GROQ_API_KEY="la_tua_nuova_chiave")
+# Su Streamlit Cloud, inseriscila nei Secrets.
 # ------------------------------------------------------------------
-CHIAVE_GROQ = "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"
+CHIAVE_GROQ = os.environ.get("GROQ_API_KEY")
+if not CHIAVE_GROQ:
+    raise ValueError("La variabile d'ambiente GROQ_API_KEY non è impostata. Su Streamlit Cloud, aggiungila nei Secrets.")
+
 client = Groq(api_key=CHIAVE_GROQ)
 MODELLO = "openai/gpt-oss-120b"
 
