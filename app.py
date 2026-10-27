@@ -5,7 +5,6 @@ Richiede nella stessa cartella main.py (MODELLO, chiedi_agente)
 e report_html.py.
 """
 import base64
-import os
 import re
 import time
 import urllib.request
@@ -15,14 +14,6 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
-
-# La chiave Groq non sta nel codice: su Streamlit Cloud va nei Secrets
-# (GROQ_API_KEY = "..."), in locale come variabile d'ambiente.
-if "GROQ_API_KEY" not in os.environ:
-    try:
-        os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        pass
 
 from main import MODELLO, chiedi_agente
 from report_html import (
@@ -130,9 +121,6 @@ UI = {
             "I rapporti (debito netto/FCF, rendimento da FCF, potenziale sul target) sono già calcolati: citali, non rifarli. "
             "Rispondi con un elenco puntato di massimo 3 punti, una o due frasi ciascuno, e cita almeno un numero per punto. "
             "Non usare formule come 'compra' o 'vendi'."
-            " Valuta la coerenza tra multipli e crescita (P/E rispetto alla crescita, PEG): non definire elevato un multiplo basso a fronte di una crescita a doppia cifra, né economico uno alto con crescita debole; usa il rapporto già fornito."
-            " Esprimi ogni importo nella valuta indicata nei dati e non mescolare valute diverse."
-            " Per il debito netto usa la dicitura già fornita (per esempio 'Cassa netta'), senza citarlo come numero negativo."
         ),
         "istruzioni": {
             "contabile": (
@@ -204,9 +192,6 @@ UI = {
             "The ratios (net debt/FCF, FCF yield, upside to target) are already calculated: quote them, do not recalculate them. "
             "Reply with a bulleted list of at most 3 points, one or two sentences each, and cite at least one number per point. "
             "Do not use phrases such as 'buy' or 'sell'."
-            " Check the consistency between multiples and growth (P/E relative to growth, PEG): do not call a low multiple 'high' when growth is double-digit, nor a high multiple cheap when growth is weak; use the ratio already provided."
-            " State every amount in the currency given in the data and never mix currencies."
-            " For net debt use the wording already provided (for example 'Net cash'), without quoting it as a negative number."
         ),
         "istruzioni": {
             "contabile": (
@@ -255,34 +240,6 @@ def scarica_info(ticker: str) -> dict:
             return dati
         time.sleep(1 + tentativo)
     raise DatiNonDisponibili(ticker)
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def scarica_cambio(da: str, a: str):
-    """Unità di valuta `a` per 1 unità di valuta `da` (es. TWD -> USD ≈ 0,031),
-    dall'ultima chiusura su Yahoo Finance. None se non disponibile."""
-    if da == a:
-        return 1.0
-    if (da, a) == ("GBP", "GBp"):
-        return 100.0
-    if (da, a) == ("GBp", "GBP"):
-        return 0.01
-    try:
-        storico = yf.Ticker(f"{da}{a}=X").history(period="5d")
-        valore = float(storico["Close"].dropna().iloc[-1])
-        return valore if valore > 0 else None
-    except Exception:
-        return None
-
-
-def metriche_titolo(info: dict, lang: str) -> dict:
-    """Metriche del titolo; se il bilancio è in una valuta diversa da quella
-    di quotazione (es. TSM: bilancio in TWD, prezzo in USD) converte i valori
-    di bilancio nella valuta di quotazione."""
-    valuta = info.get("currency") or "USD"
-    valuta_bilancio = info.get("financialCurrency") or valuta
-    cambio = scarica_cambio(valuta_bilancio, valuta) if valuta_bilancio != valuta else None
-    return calcola_metriche(info, lang, cambio)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -357,7 +314,7 @@ def scarica_concorrenti(ticker: str, info: dict, manuali: list, lang: str, n: in
         nome = dati.get("longName") or dati.get("shortName")
         if not nome:
             continue
-        metriche = metriche_titolo(dati, lang)
+        metriche = calcola_metriche(dati, lang)
         if metriche["prezzo"] is None and metriche["mcap"] is None:
             continue
         trovati.append({"ticker": simbolo, "nome": nome, "m": metriche})
@@ -508,7 +465,7 @@ if avvia:
                     raise ValueError(T["nessun_dato"].format(t=ticker_input))
                 nome = info.get("longName") or info.get("shortName")
 
-                m = metriche_titolo(info, lang)
+                m = calcola_metriche(info, lang)
                 storico = scarica_storico(ticker_input)
                 # Usa direttamente il logo di Valore Capital
                 logo = LOGO_URL
