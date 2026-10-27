@@ -12,9 +12,17 @@ import urllib.request
 from urllib.parse import urlparse
 
 import pandas as pd
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
+
+# --- SESSIONE PERSONALIZZATA PER YAHOO FINANCE ---
+# Questo aiuta a evitare i blocchi (errore 429) su Streamlit Cloud
+_session_yf = requests.Session()
+_session_yf.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+})
 
 # La chiave Groq non sta nel codice: su Streamlit Cloud va nei Secrets
 # (GROQ_API_KEY = "..."), in locale come variabile d'ambiente.
@@ -248,7 +256,8 @@ def scarica_info(ticker: str) -> dict:
     riprova davvero invece di riavere per 15 minuti un risultato vuoto."""
     for tentativo in range(3):
         try:
-            dati = yf.Ticker(ticker).info or {}
+            # Usa la sessione personalizzata
+            dati = yf.Ticker(ticker, session=_session_yf).info or {}
         except Exception:
             dati = {}
         if dati.get("longName") or dati.get("shortName"):
@@ -268,7 +277,7 @@ def scarica_cambio(da: str, a: str):
     if (da, a) == ("GBp", "GBP"):
         return 0.01
     try:
-        storico = yf.Ticker(f"{da}{a}=X").history(period="5d")
+        storico = yf.Ticker(f"{da}{a}=X", session=_session_yf).history(period="5d")
         valore = float(storico["Close"].dropna().iloc[-1])
         return valore if valore > 0 else None
     except Exception:
@@ -294,7 +303,8 @@ def cerca_titoli(testo: str):
     if len(testo) < 2:
         return []
     try:
-        quotes = yf.Search(testo, max_results=8, news_count=0).quotes
+        # Usa la sessione personalizzata
+        quotes = yf.Search(testo, max_results=8, news_count=0, session=_session_yf).quotes
     except Exception:
         return []
     risultati = []
@@ -375,7 +385,8 @@ def scarica_storico(ticker: str):
     Se il download fallisce restituisce None: il report si genera lo stesso.
     """
     try:
-        df = yf.Ticker(ticker).history(period="2y", interval="1d", auto_adjust=False)
+        # Usa la sessione personalizzata
+        df = yf.Ticker(ticker, session=_session_yf).history(period="2y", interval="1d", auto_adjust=False)
     except Exception:
         return None
     if df is None or df.empty:
