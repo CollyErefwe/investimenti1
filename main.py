@@ -22,6 +22,51 @@ def ottieni_dati_ticker(simbolo):
 # ------------------------------------------------------------------
 CHIAVE_GROQ = "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"
 client = Groq(api_key=CHIAVE_GROQ)
+import requests
+
+FMP_API_KEY = os.getenv("FMP_API_KEY", "zeEW4XQNZqNWijY2vvSFl2GsYS97696o")
+
+def recupera_dati_fmp(ticker: str) -> dict:
+    session = requests.Session()
+    
+    # 1. Profilo aziendale (nome, settore, prezzo, beta, descrizione)
+    url_profile = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
+    res_profile = session.get(url_profile).json()
+    if not res_profile or not isinstance(res_profile, list) or len(res_profile) == 0:
+        return {}
+    p = res_profile[0]
+
+    # 2. Metriche e multipli (P/E forward, PEG, P/B, Dividend Yield, ecc.)
+    url_metrics = f"https://financialmodelingprep.com/api/v3/key-metrics-ttm/{ticker}?apikey={FMP_API_KEY}"
+    res_metrics = session.get(url_metrics).json()
+    m = res_metrics[0] if (res_metrics and isinstance(res_metrics, list) and len(res_metrics) > 0) else {}
+
+    # 3. Ratios (ROE, Margini, Debt/Equity)
+    url_ratios = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
+    res_ratios = session.get(url_ratios).json()
+    r = res_ratios[0] if (res_ratios and isinstance(res_ratios, list) and len(res_ratios) > 0) else {}
+
+    # Costruiamo il dizionario con gli stessi nomi usati dal tuo codice
+    dati = {
+        "longName": p.get("companyName"),
+        "sector": p.get("sector"),
+        "industry": p.get("industry"),
+        "currentPrice": p.get("price"),
+        "marketCap": p.get("mktCap"),
+        "beta": p.get("beta"),
+        "forwardPE": m.get("peRatioTTM") or r.get("priceEarningsRatioTTM"),
+        "trailingPE": r.get("priceEarningsRatioTTM"),
+        "pegRatio": m.get("pegRatioTTM"),
+        "priceToBook": r.get("priceToBookRatioTTM"),
+        "dividendYield": r.get("dividendYieldTTM"),
+        "returnOnEquity": r.get("returnOnEquityTTM"),
+        "debtToEquity": r.get("debtEquityRatioTTM"),
+        "grossMargins": r.get("grossProfitMarginTTM"),
+        "operatingMargins": r.get("operatingProfitMarginTTM"),
+        "profitMargins": r.get("netProfitMarginTTM"),
+        "longBusinessSummary": p.get("description"),
+    }
+    return dati
 MODELLO = "openai/gpt-oss-120b"
 
 
@@ -334,16 +379,14 @@ def analizza_azienda(ticker: str):
     print(f" COMITATO DI INVESTIMENTO: ANALISI {ticker}")
     print("=" * 55)
 
-    print(f"[>] Recupero dati finanziari per {ticker}...")
-    stock = ottieni_dati_ticker(ticker)
-
+    print(f"[>] Recupero dati finanziari per {ticker} via FMP...")
     try:
-        dati = stock.info
+        dati = recupera_dati_fmp(ticker)
         if not dati or dati.get("longName") is None:
             print(f"[!] Errore: Ticker '{ticker}' non valido o non trovato.\n")
             return None
     except Exception as e:
-        print(f"[!] Errore Yahoo Finance: {e}\n")
+        print(f"[!] Errore recupero dati: {e}\n")
         return None
 
     nome_azienda = dati.get("longName", ticker)
