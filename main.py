@@ -2,8 +2,18 @@ import html
 import os
 import re
 import time
-import yfinance as yf
+from curl_cffi import requests
 from groq import Groq
+import yfinance as yf
+
+
+def ottieni_dati_ticker(simbolo):
+  # Crea una sessione che simula alla perfezione l'impronta TLS di Google Chrome
+  session = requests.Session(impersonate="chrome120")
+
+  # Passa la sessione a yfinance
+  ticker = yf.Ticker(simbolo, session=session)
+  return ticker
 
 # ------------------------------------------------------------------
 # CONFIGURAZIONE API GROQ
@@ -325,7 +335,7 @@ def analizza_azienda(ticker: str):
     print("=" * 55)
 
     print(f"[>] Recupero dati finanziari per {ticker}...")
-    stock = yf.Ticker(ticker)
+    stock = ottieni_dati_ticker(ticker)
 
     try:
         dati = stock.info
