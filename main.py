@@ -7,12 +7,27 @@ from groq import Groq
 
 # ------------------------------------------------------------------
 # CONFIGURAZIONE API GROQ
-# La chiave va impostata come variabile d'ambiente GROQ_API_KEY
-# (es. in terminale: export GROQ_API_KEY="la_tua_nuova_chiave")
+# La chiave NON va scritta nel codice. Impostala come variabile d'ambiente
+# GROQ_API_KEY (terminale: export GROQ_API_KEY="...") oppure, su Streamlit
+# Cloud, nei Secrets dell'app (app.py la copia in questa variabile).
 # ------------------------------------------------------------------
-CHIAVE_GROQ = "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"
-client = Groq(api_key=CHIAVE_GROQ)
 MODELLO = "openai/gpt-oss-120b"
+_client = None
+
+
+def _get_client() -> Groq:
+    """Crea il client Groq alla prima richiesta, così l'import di questo
+    modulo non fallisce se la chiave non è ancora impostata."""
+    global _client
+    if _client is None:
+        chiave = os.environ.get("GROQ_API_KEY")
+        if not chiave:
+            raise RuntimeError(
+                "Chiave GROQ_API_KEY mancante: impostala come variabile d'ambiente "
+                "o nei Secrets di Streamlit."
+            )
+        _client = Groq(api_key=chiave)
+    return _client
 
 
 def chiedi_agente(
@@ -65,7 +80,7 @@ def chiedi_agente(
     tentativi = 3
     for tentativo in range(tentativi):
         try:
-            risposta = client.chat.completions.create(
+            risposta = _get_client().chat.completions.create(
                 model=MODELLO,
                 messages=[
                     {
@@ -90,6 +105,8 @@ def chiedi_agente(
 
             time.sleep(3)
 
+        except RuntimeError:
+            raise  # chiave mancante: inutile riprovare
         except Exception as e:
             err_msg = str(e).lower()
             if "rate_limit" in err_msg or "429" in err_msg:
