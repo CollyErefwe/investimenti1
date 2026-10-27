@@ -32,10 +32,13 @@ STR = {
         "av_prezzo": "Prezzo non disponibile.",
         "av_fcf": "Free cash flow non disponibile: i rapporti che lo usano non sono calcolati.",
         "av_valuta": "Il prezzo è in {v} e il bilancio in {vb}: rendimento e multiplo sul free cash flow non sono calcolati.",
+        "av_conv": "Bilancio in {vb} convertito in {v} al cambio di {c}: free cash flow, cassa, debito, EV ed EBITDA sono espressi in {v}.",
         "cassa_netta": "Cassa netta", "fcf_neg": "FCF non positivo", "anni_fcf": "anni di FCF",
         "margine_netto": "Margine netto", "margine_op": "Margine operativo", "roe": "ROE",
         "crescita": "Crescita ricavi (trimestre su anno)", "fcf": "Free cash flow", "cassa": "Cassa",
         "debito": "Debito totale", "debito_netto": "Debito netto", "dn_fcf": "Debito netto rispetto al FCF",
+        "payout": "Payout ratio (utili distribuiti)", "div_yield": "Rendimento da dividendo",
+        "nessun_div": "Nessun dividendo",
         "mcap": "Capitalizzazione", "ev": "Valore d'impresa (EV)", "pe_fwd": "P/E atteso (forward)",
         "pe_trail": "P/E storico (trailing)", "ev_ebitda": "EV / EBITDA", "p_fcf": "Prezzo / free cash flow",
         "fcf_yield": "Rendimento da free cash flow", "upside": "Potenziale rispetto al target medio",
@@ -44,6 +47,8 @@ STR = {
         "ag_52": "Intervallo 52 settimane", "ag_target": "Target analisti (min / medio / max)",
         "ag_upside": "Potenziale sul target medio", "ag_pfcf": "Prezzo/FCF", "ag_yield": "Rendimento da FCF",
         "ag_crescita": "Crescita ricavi (trimestre su anno)", "ag_dnfcf": "Debito netto / FCF (anni)",
+        "ag_div": "Dividendo",
+        "ag_peg": "P/E forward / crescita ricavi % (indicativo: sotto 1 = multiplo basso rispetto alla crescita)",
         "ag_avvisi": "Avvisi sui dati",
         "ag_nota": "I rapporti sono già calcolati dal sistema: non rifare i calcoli.",
         "dato_nd": "Dato non disponibile.", "intervalli_nd": "Intervalli di prezzo non disponibili.",
@@ -108,10 +113,13 @@ STR = {
         "av_prezzo": "Price not available.",
         "av_fcf": "Free cash flow not available: the ratios that use it are not calculated.",
         "av_valuta": "The price is in {v} and the financial statements in {vb}: free cash flow yield and multiple are not calculated.",
+        "av_conv": "Financial statements in {vb} converted to {v} at {c}: free cash flow, cash, debt, EV and EBITDA are stated in {v}.",
         "cassa_netta": "Net cash", "fcf_neg": "FCF not positive", "anni_fcf": "years of FCF",
         "margine_netto": "Net margin", "margine_op": "Operating margin", "roe": "ROE",
         "crescita": "Revenue growth (quarter on year)", "fcf": "Free cash flow", "cassa": "Cash",
         "debito": "Total debt", "debito_netto": "Net debt", "dn_fcf": "Net debt to FCF",
+        "payout": "Payout ratio (earnings distributed)", "div_yield": "Dividend yield",
+        "nessun_div": "No dividend",
         "mcap": "Market cap", "ev": "Enterprise value (EV)", "pe_fwd": "Forward P/E",
         "pe_trail": "Trailing P/E", "ev_ebitda": "EV / EBITDA", "p_fcf": "Price / free cash flow",
         "fcf_yield": "Free cash flow yield", "upside": "Upside to mean target",
@@ -120,6 +128,8 @@ STR = {
         "ag_52": "52-week range", "ag_target": "Analyst targets (low / mean / high)",
         "ag_upside": "Upside to mean target", "ag_pfcf": "Price/FCF", "ag_yield": "FCF yield",
         "ag_crescita": "Revenue growth (quarter on year)", "ag_dnfcf": "Net debt / FCF (years)",
+        "ag_div": "Dividend",
+        "ag_peg": "Forward P/E / revenue growth % (indicative: below 1 = low multiple relative to growth)",
         "ag_avvisi": "Data notices",
         "ag_nota": "Ratios are already computed by the system: do not recalculate them.",
         "dato_nd": "Data not available.", "intervalli_nd": "Price ranges not available.",
@@ -250,15 +260,22 @@ def fmt_grande(v, valuta):
 
 # ---------------------------------------------------------------- metriche
 
-def calcola_metriche(info: dict, lang: str = None) -> dict:
+def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict:
     """Ricava dai dati grezzi di Yahoo Finance i rapporti che NON devono
-    essere calcolati dal modello linguistico."""
+    essere calcolati dal modello linguistico.
+
+    `cambio` = unità di valuta di quotazione per 1 unità di valuta di
+    bilancio (es. TWD -> USD ≈ 0,031). Se il bilancio è in una valuta diversa
+    dal prezzo e il cambio c'è, free cash flow, cassa, debito ed EBITDA
+    vengono convertiti nella valuta di quotazione; senza cambio i valori
+    inaffidabili (EV, EV/EBITDA, rapporti sul FCF) restano N/D."""
     _imposta(lang)
     g = lambda k: _num(info.get(k))  # noqa: E731
 
     valuta = info.get("currency") or "USD"
     valuta_bilancio = info.get("financialCurrency") or valuta
     stessa_valuta = valuta == valuta_bilancio
+    convertito = False
 
     prezzo = g("currentPrice") or g("regularMarketPrice")
     target = g("targetMeanPrice")
@@ -266,9 +283,26 @@ def calcola_metriche(info: dict, lang: str = None) -> dict:
     fcf = g("freeCashflow")
     cassa = g("totalCash")
     debito = g("totalDebt")
+    ebitda = g("ebitda")
+    ev = g("enterpriseValue")
+    ev_ebitda = g("enterpriseToEbitda")
     minimo, massimo = g("fiftyTwoWeekLow"), g("fiftyTwoWeekHigh")
 
+    if not stessa_valuta:
+        if cambio:
+            def conv(x):
+                return x * cambio if x is not None else None
+            fcf, cassa, debito, ebitda = conv(fcf), conv(cassa), conv(debito), conv(ebitda)
+            convertito = stessa_valuta = True
+        else:
+            ev, ev_ebitda = None, None  # valute miste: valori inaffidabili
+
     debito_netto = debito - cassa if debito is not None and cassa is not None else None
+    if convertito:
+        # Yahoo calcola EV ed EV/EBITDA mescolando valute: li rifacciamo noi.
+        ev = mcap + debito_netto if mcap is not None and debito_netto is not None else None
+        ev_ebitda = ev / ebitda if ev is not None and ebitda and ebitda > 0 else None
+
     debito_netto_su_fcf = (
         debito_netto / fcf
         if debito_netto is not None and fcf is not None and fcf > 0
@@ -283,17 +317,31 @@ def calcola_metriche(info: dict, lang: str = None) -> dict:
         else None
     )
 
+    # Dividendi: rendimento = dividendo annuo / prezzo (il campo dividendYield
+    # di Yahoo ha cambiato scala nelle versioni recenti, meglio non usarlo).
+    dividendo = g("dividendRate") or g("trailingAnnualDividendRate")
+    paga_div = bool(dividendo and dividendo > 0)
+    div_yield = (dividendo / prezzo if prezzo else g("trailingAnnualDividendYield")) if paga_div else None
+    payout = g("payoutRatio") if paga_div else None
+
+    # P/E rispetto alla crescita dei ricavi (indicativo, non è il vero PEG,
+    # che userebbe la crescita degli utili).
+    pe_fwd, crescita = g("forwardPE"), g("revenueGrowth")
+    peg_ricavi = pe_fwd / (crescita * 100) if pe_fwd and pe_fwd > 0 and crescita and crescita > 0 else None
+
     avvisi = []
     if prezzo is None:
         avvisi.append(_t("av_prezzo"))
     if fcf is None:
         avvisi.append(_t("av_fcf"))
-    if not stessa_valuta:
+    if convertito:
+        avvisi.append(_t("av_conv").format(vb=valuta_bilancio, v=valuta, c=_it(cambio, 4)))
+    elif valuta != valuta_bilancio:
         avvisi.append(_t("av_valuta").format(v=valuta, vb=valuta_bilancio))
 
     return {
         "valuta": valuta,
-        "valuta_bilancio": valuta_bilancio,
+        "valuta_bilancio": valuta if convertito else valuta_bilancio,
         "prezzo": prezzo,
         "target": target,
         "target_min": g("targetLowPrice"),
@@ -301,7 +349,7 @@ def calcola_metriche(info: dict, lang: str = None) -> dict:
         "n_analisti": g("numberOfAnalystOpinions"),
         "upside": upside,
         "mcap": mcap,
-        "ev": g("enterpriseValue"),
+        "ev": ev,
         "fcf": fcf,
         "cassa": cassa,
         "debito": debito,
@@ -309,13 +357,17 @@ def calcola_metriche(info: dict, lang: str = None) -> dict:
         "debito_netto_su_fcf": debito_netto_su_fcf,
         "fcf_yield": fcf_yield,
         "p_fcf": p_fcf,
-        "pe_fwd": g("forwardPE"),
+        "pe_fwd": pe_fwd,
         "pe_trail": g("trailingPE"),
-        "ev_ebitda": g("enterpriseToEbitda"),
+        "ev_ebitda": ev_ebitda,
         "margine_netto": g("profitMargins"),
         "margine_op": g("operatingMargins"),
         "roe": g("returnOnEquity"),
-        "crescita_ricavi": g("revenueGrowth"),
+        "crescita_ricavi": crescita,
+        "paga_div": paga_div,
+        "div_yield": div_yield,
+        "payout": payout,
+        "peg_ricavi": peg_ricavi,
         "min52": minimo,
         "max52": massimo,
         "pos52": pos52,
@@ -349,6 +401,7 @@ def righe_qualita(m):
         (_t("debito"), fmt_grande(m["debito"], vb)),
         (_t("debito_netto"), fmt_grande(m["debito_netto"], vb)),
         (_t("dn_fcf"), _ratio_debito(m)),
+        (_t("payout"), fmt_pct(m["payout"]) if m["paga_div"] else _t("nessun_div")),
     ]
 
 
@@ -362,6 +415,7 @@ def righe_valutazione(m):
         (_t("ev_ebitda"), fmt_x(m["ev_ebitda"])),
         (_t("p_fcf"), fmt_x(m["p_fcf"])),
         (_t("fcf_yield"), fmt_pct(m["fcf_yield"])),
+        (_t("div_yield"), fmt_pct(m["div_yield"]) if m["paga_div"] else _t("nessun_div")),
         (_t("upside"), fmt_pct(m["upside"], segno=True)),
     ]
 
@@ -403,12 +457,16 @@ def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict, lang: str = Non
         f"{_t('ag_target')}: {_raw(m['target_min'])} / {_raw(m['target'])} / {_raw(m['target_max'])} {v}"
         f" | {_t('ag_upside')}: {_raw(m['upside'], 1, pct=True)}",
         f"P/E forward: {_raw(m['pe_fwd'], 1)} | P/E trailing: {_raw(m['pe_trail'], 1)} | EV/EBITDA: {_raw(m['ev_ebitda'], 1)}",
+        f"{_t('ag_peg')}: {_raw(m['peg_ricavi'], 2)}",
         f"{_t('ag_pfcf')}: {_raw(m['p_fcf'], 1)} | {_t('ag_yield')}: {_raw(m['fcf_yield'], 1, pct=True)}",
         f"{_t('margine_netto')}: {_raw(m['margine_netto'], 1, pct=True)} | {_t('margine_op')}: {_raw(m['margine_op'], 1, pct=True)}"
         f" | ROE: {_raw(m['roe'], 1, pct=True)}",
         f"{_t('ag_crescita')}: {_raw(m['crescita_ricavi'], 1, pct=True)}",
         f"{_t('fcf')}: {_mld(m['fcf'])} {vb} | {_t('cassa')}: {_mld(m['cassa'])} {vb} | {_t('debito')}: {_mld(m['debito'])} {vb}",
-        f"{_t('debito_netto')}: {_mld(m['debito_netto'])} {vb} | {_t('ag_dnfcf')}: {_raw(m['debito_netto_su_fcf'], 2)}",
+        f"{_t('debito_netto')}: {_mld(m['debito_netto'])} {vb} | {_t('ag_dnfcf')}: {_ratio_debito(m)}",
+        f"{_t('ag_div')}: " + (
+            f"{fmt_pct(m['div_yield'])} | {_t('payout')}: {fmt_pct(m['payout'])}"
+            if m["paga_div"] else _t("nessun_div")),
     ]
     if m["avvisi"]:
         righe.append(f"{_t('ag_avvisi')}: " + " ".join(m["avvisi"]))
@@ -1459,6 +1517,7 @@ if __name__ == "__main__":
         "forwardPE": 26.4, "trailingPE": 29.8, "enterpriseToEbitda": 21.5,
         "profitMargins": 0.47, "operatingMargins": 0.66, "returnOnEquity": 0.55, "revenueGrowth": 0.09,
         "fiftyTwoWeekLow": 198.0, "fiftyTwoWeekHigh": 251.0, "beta": 0.95,
+        "dividendRate": 2.6, "payoutRatio": 0.24,
     }
     info.update(dati)
     m = calcola_metriche(info)
