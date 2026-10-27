@@ -2,72 +2,39 @@ import html
 import os
 import re
 import time
-from curl_cffi import requests
-from groq import Groq
+
+import requests
 import yfinance as yf
 
-
-def ottieni_dati_ticker(simbolo):
-  # Crea una sessione che simula alla perfezione l'impronta TLS di Google Chrome
-  session = requests.Session(impersonate="chrome120")
-
-  # Passa la sessione a yfinance
-  ticker = yf.Ticker(simbolo, session=session)
-  return ticker
-
 # ------------------------------------------------------------------
-# CONFIGURAZIONE API GROQ
-# La chiave va impostata come variabile d'ambiente GROQ_API_KEY
-# (es. in terminale: export GROQ_API_KEY="la_tua_nuova_chiave")
+# CONFIGURAZIONE API GEMINI (Google AI Studio, piano gratuito)
+# La chiave NON sta nel codice: va impostata come GEMINI_API_KEY
+# (in locale: .streamlit/secrets.toml oppure variabile d'ambiente;
+# su Streamlit Cloud: nei Secrets, app.py la copia in os.environ).
+# Il modello si può cambiare senza toccare il codice con GEMINI_MODEL.
 # ------------------------------------------------------------------
-CHIAVE_GROQ = "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"
-client = Groq(api_key=CHIAVE_GROQ)
-import requests
+MODELLO = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Modello di riserva se il principale va in limite, sovraccarico o timeout.
+# Vuoto = nessuna riserva.
+MODELLO_RISERVA = os.environ.get("GEMINI_MODEL_RISERVA", "gemini-3.8-flash")
 
-FMP_API_KEY = os.getenv("FMP_API_KEY", "zeEW4XQNZqNWijY2vvSFl2GsYS97696o")
+URL_API = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
-def recupera_dati_fmp(ticker: str) -> dict:
-    session = requests.Session()
-    
-    # 1. Profilo aziendale (nome, settore, prezzo, beta, descrizione)
-    url_profile = f"https://financialmodelingprep.com/api/v3/profile/{ticker}?apikey={FMP_API_KEY}"
-    res_profile = session.get(url_profile).json()
-    if not res_profile or not isinstance(res_profile, list) or len(res_profile) == 0:
-        return {}
-    p = res_profile[0]
 
-    # 2. Metriche e multipli (P/E forward, PEG, P/B, Dividend Yield, ecc.)
-    url_metrics = f"https://financialmodelingprep.com/api/v3/key-metrics-ttm/{ticker}?apikey={FMP_API_KEY}"
-    res_metrics = session.get(url_metrics).json()
-    m = res_metrics[0] if (res_metrics and isinstance(res_metrics, list) and len(res_metrics) > 0) else {}
+def _chiave() -> str:
+    chiave = os.environ.get("GEMINI_API_KEY")
+    if not chiave:
+        raise RuntimeError("GEMINI_API_KEY non impostata (variabile d'ambiente o Secrets di Streamlit).")
+    return chiave
 
-    # 3. Ratios (ROE, Margini, Debt/Equity)
-    url_ratios = f"https://financialmodelingprep.com/api/v3/ratios-ttm/{ticker}?apikey={FMP_API_KEY}"
-    res_ratios = session.get(url_ratios).json()
-    r = res_ratios[0] if (res_ratios and isinstance(res_ratios, list) and len(res_ratios) > 0) else {}
 
-    # Costruiamo il dizionario con gli stessi nomi usati dal tuo codice
-    dati = {
-        "longName": p.get("companyName"),
-        "sector": p.get("sector"),
-        "industry": p.get("industry"),
-        "currentPrice": p.get("price"),
-        "marketCap": p.get("mktCap"),
-        "beta": p.get("beta"),
-        "forwardPE": m.get("peRatioTTM") or r.get("priceEarningsRatioTTM"),
-        "trailingPE": r.get("priceEarningsRatioTTM"),
-        "pegRatio": m.get("pegRatioTTM"),
-        "priceToBook": r.get("priceToBookRatioTTM"),
-        "dividendYield": r.get("dividendYieldTTM"),
-        "returnOnEquity": r.get("returnOnEquityTTM"),
-        "debtToEquity": r.get("debtEquityRatioTTM"),
-        "grossMargins": r.get("grossProfitMarginTTM"),
-        "operatingMargins": r.get("operatingProfitMarginTTM"),
-        "profitMargins": r.get("netProfitMarginTTM"),
-        "longBusinessSummary": p.get("description"),
-    }
-    return dati
-MODELLO = "openai/gpt-oss-120b"
+def _attesa_da_errore(messaggio: str, tentativo: int) -> float:
+    """Secondi da aspettare dopo un errore di limite: usa il tempo indicato
+    dall'API ('retry in 12.3s' / 'retryDelay: 12s') oppure un'attesa crescente."""
+    m = re.search(r"retry(?:delay)?\D{0,12}([\d.]+)\s*s", messaggio)
+    if m:
+        return min(float(m.group(1)) + 1, 45)
+    return min(5 * (tentativo + 1), 30)
 
 
 def chiedi_agente(
@@ -88,8 +55,8 @@ def chiedi_agente(
             f"DATA:\n{contesto}\n\n"
             "MANDATORY CONSTRAINTS:\n"
             "- Reply EXCLUSIVELY in English.\n"
-            "- Write only 2 bullet points preceded by a dash '- '.\n"
-            "- Each point must be a single sentence of at most 18 words.\n"
+            "- Write exactly 2 bullet points preceded by a dash '- '.\n"
+            "- Each point must be a single sentence of at most 25 words.\n"
             "- You MUST end every line with a full stop '.' before stopping.\n"
             "- No preamble, no comments in any other language."
         )
@@ -105,8 +72,8 @@ def chiedi_agente(
             f"DATI:\n{contesto}\n\n"
             "VINCOLI TASSATIVI:\n"
             "- Rispondi ESCLUSIVAMENTE in lingua italiana.\n"
-            "- Scrivi solo 2 punti elenco preceduti da trattino '- '.\n"
-            "- Ogni punto deve essere una singola frase di massimo 18 parole.\n"
+            "- Scrivi esattamente 2 punti elenco preceduti da trattino '- '.\n"
+            "- Ogni punto deve essere una singola frase di massimo 25 parole.\n"
             "- Termina OBBLIGATORIAMENTE ogni riga con il punto fermo '.' prima di"
             " fermarti.\n"
             "- Nessun preambolo, nessun commento in inglese."
@@ -117,44 +84,91 @@ def chiedi_agente(
         )
         errore_api = "- Dati al momento non disponibili per sovraccarico API."
 
-    tentativi = 3
+    tentativi = 5
+    ultimo_errore = ""
+    modello = MODELLO
+    # Nei modelli Gemini 2.5 i token di ragionamento contano nel limite di
+    # uscita: lasciamo più spazio di max_t, altrimenti la risposta resta vuota.
+    max_uscita = max(max_t * 2, 1800)
+    con_ragionamento = True
+
     for tentativo in range(tentativi):
         try:
-            risposta = client.chat.completions.create(
-                model=MODELLO,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": sistema,
-                    },
+            corpo = {
+                "model": modello,
+                "messages": [
+                    {"role": "system", "content": sistema},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=1,
-                max_completion_tokens=3050,
+                "temperature": 0.6,
+                "max_tokens": max_uscita,
+            }
+            if con_ragionamento:
+                corpo["reasoning_effort"] = "low"
+
+            r = requests.post(
+                URL_API,
+                headers={"Authorization": f"Bearer {_chiave()}", "Content-Type": "application/json"},
+                json=corpo,
+                timeout=60,
             )
 
-            testo = risposta.choices[0].message.content
-            if testo and testo.strip():
-                testo_pulito = testo.strip()
+            if r.status_code != 200:
+                ultimo_errore = f"HTTP {r.status_code}: {r.text[:300]}"
+                if r.status_code == 429:
+                    attesa = _attesa_da_errore(r.text.lower(), tentativo)
+                    print(f"[!] Limite raggiunto, attesa di {attesa:.0f} secondi... (tentativo {tentativo + 1}/{tentativi})")
+                    print(f"    [dettaglio] {ultimo_errore}")
+                    if "per day" in r.text.lower() or "perday" in r.text.lower():
+                        print("[!] Limite GIORNALIERO raggiunto: inutile riprovare.")
+                        break
+                    if MODELLO_RISERVA and tentativo >= 1 and modello != MODELLO_RISERVA:
+                        modello = MODELLO_RISERVA
+                        print(f"[i] Passo al modello di riserva: {MODELLO_RISERVA}")
+                    time.sleep(attesa)
+                elif r.status_code in (500, 502, 503, 504):
+                    # Sovraccarico temporaneo lato Google: attesa crescente e,
+                    # se impostato, passaggio al modello di riserva.
+                    attesa = min(8 * (tentativo + 1), 40)
+                    print(f"[!] Servizio momentaneamente sovraccarico ({r.status_code}), attesa di {attesa} secondi... (tentativo {tentativo + 1}/{tentativi})")
+                    if MODELLO_RISERVA and tentativo >= 1 and modello != MODELLO_RISERVA:
+                        modello = MODELLO_RISERVA
+                        print(f"[i] Passo al modello di riserva: {MODELLO_RISERVA}")
+                    time.sleep(attesa)
+                elif r.status_code == 400 and con_ragionamento and "reasoning" in r.text.lower():
+                    con_ragionamento = False  # il modello non supporta reasoning_effort
+                    print("[i] Modello senza reasoning_effort: riprovo senza.")
+                else:
+                    print(f"[!] Errore API: {ultimo_errore}")
+                    if r.status_code in (401, 403):
+                        break  # chiave non valida o non autorizzata: inutile riprovare
+                    time.sleep(3)
+                continue
 
-                if "</think>" in testo_pulito:
-                    testo_pulito = testo_pulito.split("</think>")[-1].strip()
+            testo = (r.json()["choices"][0]["message"].get("content") or "").strip()
+            if "</think>" in testo:
+                testo = testo.split("</think>")[-1].strip()
 
-                print(f"    [OK] Risposta completata ({len(testo_pulito)} caratteri)")
-                return testo_pulito
+            if testo:
+                print(f"    [OK] Risposta completata ({len(testo)} caratteri)")
+                return testo
 
-            time.sleep(3)
+            ultimo_errore = "risposta vuota (token esauriti dal ragionamento?)"
+            print(f"[!] {ultimo_errore}; riprovo con più spazio (tentativo {tentativo + 1}/{tentativi})")
+            max_uscita = int(max_uscita * 1.5)
+            time.sleep(2)
 
         except Exception as e:
-            err_msg = str(e).lower()
-            if "rate_limit" in err_msg or "429" in err_msg:
-                print(f"[!] Limite Groq raggiunto, attesa di 15 secondi... (tentativo {tentativo + 1}/{tentativi})")
-                time.sleep(15)
-            else:
-                print(f"[!] Errore API: {e}")
-                time.sleep(3)
+            ultimo_errore = str(e)
+            print(f"[!] Errore: {e}")
+            # Timeout o problemi di rete: dal secondo tentativo prova il modello di riserva.
+            if MODELLO_RISERVA and tentativo >= 1 and modello != MODELLO_RISERVA:
+                modello = MODELLO_RISERVA
+                print(f"[i] Passo al modello di riserva: {MODELLO_RISERVA}")
+            time.sleep(3)
 
-    return errore_api
+    # Mostra anche l'errore vero, così non resta nascosto.
+    return f"{errore_api} (dettaglio: {ultimo_errore[:200]})"
 
 
 def genera_scheda_html(
@@ -379,14 +393,16 @@ def analizza_azienda(ticker: str):
     print(f" COMITATO DI INVESTIMENTO: ANALISI {ticker}")
     print("=" * 55)
 
-    print(f"[>] Recupero dati finanziari per {ticker} via FMP...")
+    print(f"[>] Recupero dati finanziari per {ticker}...")
+    stock = yf.Ticker(ticker)
+
     try:
-        dati = recupera_dati_fmp(ticker)
+        dati = stock.info
         if not dati or dati.get("longName") is None:
             print(f"[!] Errore: Ticker '{ticker}' non valido o non trovato.\n")
             return None
     except Exception as e:
-        print(f"[!] Errore recupero dati: {e}\n")
+        print(f"[!] Errore Yahoo Finance: {e}\n")
         return None
 
     nome_azienda = dati.get("longName", ticker)
@@ -412,7 +428,7 @@ def analizza_azienda(ticker: str):
             " qualita margini."
         ),
         contesto=sintesi_dati,
-        max_t=800,
+        max_t=900,
         pausa=6,
     )
 
@@ -424,7 +440,7 @@ def analizza_azienda(ticker: str):
             " vantaggio competitivo."
         ),
         contesto=f"{sintesi_dati}\nContabile:\n{res_contabile}",
-        max_t=800,
+        max_t=900,
         pausa=6,
     )
 
@@ -436,7 +452,7 @@ def analizza_azienda(ticker: str):
             " concorrenza."
         ),
         contesto=f"{sintesi_dati}\nBull:\n{res_bull}",
-        max_t=800,
+        max_t=900,
         pausa=6,
     )
 
@@ -448,7 +464,7 @@ def analizza_azienda(ticker: str):
             f" {dati.get('sector')}."
         ),
         contesto=sintesi_dati,
-        max_t=800,
+        max_t=900,
         pausa=6,
     )
 
