@@ -16,13 +16,15 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
-# La chiave Groq non sta nel codice: su Streamlit Cloud va nei Secrets
-# (GROQ_API_KEY = "..."), in locale come variabile d'ambiente.
-if "GROQ_API_KEY" not in os.environ:
-    try:
-        os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        pass
+# Le chiavi non stanno nel codice: su Streamlit Cloud vanno nei Secrets
+# (GEMINI_API_KEY = "..."), in locale in .streamlit/secrets.toml o come
+# variabile d'ambiente. Facoltativo: GEMINI_MODEL per cambiare modello.
+for _nome in ("GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_MODEL_RISERVA"):
+    if _nome not in os.environ:
+        try:
+            os.environ[_nome] = st.secrets[_nome]
+        except Exception:
+            pass
 
 from main import MODELLO, chiedi_agente
 from report_html import (
@@ -99,6 +101,7 @@ UI = {
         "nessun_dato": "Nessun dato trovato per il ticker {t}. Se il ticker è corretto, Yahoo Finance potrebbe aver limitato le richieste (online capita spesso): riprova tra qualche minuto.",
         "pronto": "Report pronto",
         "interrotta": "Analisi interrotta",
+        "avviso_analista": "Un analista non ha risposto (limite o errore dell'API Gemini): controlla il dettaglio nella scheda «Risposte degli analisti» e riprova tra un minuto.",
         "log": {"contabile": "Analista contabile", "bull": "Analista rialzista",
                 "bear": "Analista ribassista", "macro": "Economista macro e di settore"},
         "ruoli": {"contabile": "Analista Contabile Forense", "bull": "Analista Bull",
@@ -128,7 +131,7 @@ UI = {
         "regole": (
             " Usa SOLO i dati forniti e non inventare cifre: se un dato manca scrivi N/D. "
             "I rapporti (debito netto/FCF, rendimento da FCF, potenziale sul target) sono già calcolati: citali, non rifarli. "
-            "Rispondi con un elenco puntato di massimo 3 punti, una o due frasi ciascuno, e cita almeno un numero per punto. "
+            "Rispondi con esattamente 2 punti elenco, una frase ciascuno, e cita almeno un numero per punto. "
             "Non usare formule come 'compra' o 'vendi'."
             " Valuta la coerenza tra multipli e crescita (P/E rispetto alla crescita, PEG): non definire elevato un multiplo basso a fronte di una crescita a doppia cifra, né economico uno alto con crescita debole; usa il rapporto già fornito."
             " Esprimi ogni importo nella valuta indicata nei dati e non mescolare valute diverse."
@@ -173,6 +176,7 @@ UI = {
         "nessun_dato": "No data found for ticker {t}. If the ticker is right, Yahoo Finance may be limiting requests (common online): try again in a few minutes.",
         "pronto": "Report ready",
         "interrotta": "Analysis interrupted",
+        "avviso_analista": "An analyst did not answer (Gemini API limit or error): check the details in the \"Analyst responses\" tab and try again in a minute.",
         "log": {"contabile": "Accounting analyst", "bull": "Bull analyst",
                 "bear": "Bear analyst", "macro": "Macro and sector economist"},
         "ruoli": {"contabile": "Forensic Accounting Analyst", "bull": "Bull Analyst",
@@ -202,7 +206,7 @@ UI = {
         "regole": (
             " Use ONLY the data provided and do not invent figures: if a figure is missing, write N/A. "
             "The ratios (net debt/FCF, FCF yield, upside to target) are already calculated: quote them, do not recalculate them. "
-            "Reply with a bulleted list of at most 3 points, one or two sentences each, and cite at least one number per point. "
+            "Reply with exactly 2 bullet points, one sentence each, and cite at least one number per point. "
             "Do not use phrases such as 'buy' or 'sell'."
             " Check the consistency between multiples and growth (P/E relative to growth, PEG): do not call a low multiple 'high' when growth is double-digit, nor a high multiple cheap when growth is weak; use the ratio already provided."
             " State every amount in the currency given in the data and never mix currencies."
@@ -230,6 +234,10 @@ UI = {
 }
 
 TICKER_VALIDO = r"[A-Z0-9.\-=^]{1,15}"
+
+# Prefissi delle risposte di errore restituite da chiedi_agente quando l'API
+# non risponde (vedi main.py): servono per avvisare l'utente.
+PREFISSI_ERRORE_API = ("- Dati al momento non disponibili", "- Data currently unavailable")
 
 
 # ------------------------------------------------------------------ dati
@@ -395,23 +403,28 @@ def scarica_storico(ticker: str):
 
 def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log, lang: str) -> dict:
     """Quattro analisti lavorano in modo indipendente sulla stessa scheda dati
-    (nessuno legge le risposte degli altri)."""
+    (nessuno legge le risposte degli altri). Dopo ogni analista la sua
+    risposta viene mostrata subito nel riquadro di stato (`log`)."""
     T = UI[lang]
     dati = dati_per_agenti(nome, ticker, info, m, lang)
     regole = T["regole"]
     istr = T["istruzioni"]
 
-    log(T["log"]["contabile"])
-    contabile = chiedi_agente(T["ruoli"]["contabile"], istr["contabile"] + regole, dati, max_t=450, pausa=2, lingua=lang)
+    def lavora(chiave: str, max_t: int, pausa: int) -> str:
+        log(f"**{T['log'][chiave]}**")
+        risposta = chiedi_agente(
+            T["ruoli"][chiave], istr[chiave] + regole, dati,
+            max_t=max_t, pausa=pausa, lingua=lang,
+        )
+        log(risposta)  # così si vede subito cosa ha scritto (o l'errore)
+        return risposta
 
-    log(T["log"]["bull"])
-    bull = chiedi_agente(T["ruoli"]["bull"], istr["bull"] + regole, dati, max_t=450, pausa=4, lingua=lang)
-
-    log(T["log"]["bear"])
-    bear = chiedi_agente(T["ruoli"]["bear"], istr["bear"] + regole, dati, max_t=450, pausa=4, lingua=lang)
-
-    log(T["log"]["macro"])
-    macro = chiedi_agente(T["ruoli"]["macro"], istr["macro"] + regole, dati, max_t=400, pausa=4, lingua=lang)
+    # max_t ora viene rispettato da chiedi_agente: valori più bassi = meno
+    # token contati nel limite al minuto dell'API. Le pause distanziano le chiamate.
+    contabile = lavora("contabile", max_t=900, pausa=2)
+    bull = lavora("bull", max_t=900, pausa=5)
+    bear = lavora("bear", max_t=900, pausa=5)
+    macro = lavora("macro", max_t=800, pausa=5)
 
     return {
         "bull": bull,
@@ -523,6 +536,11 @@ if avvia:
                 )
 
                 esito = esegui_comitato(ticker_input, nome, info, m, st.write, lang)
+
+                # Se un analista non ha risposto per colpa dell'API, avvisa
+                # subito invece di nascondere il problema nel report.
+                if any(str(r).startswith(PREFISSI_ERRORE_API) for r in esito.values()):
+                    st.warning(T["avviso_analista"])
 
                 # 1. Genera l'immagine del grafico a candele per il PDF
                 immagine_grafico = genera_grafico_statico_png(storico, m)
