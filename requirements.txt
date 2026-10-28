@@ -1,7 +1,6 @@
 streamlit
 yfinance
-curl_cffi
 pandas
+requests
 matplotlib
-groq
 playwright
