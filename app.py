@@ -4,12 +4,9 @@ Avvio:  streamlit run app.py
 Richiede nella stessa cartella main.py (MODELLO, chiedi_agente)
 e report_html.py.
 """
-import base64
 import os
 import re
 import time
-import urllib.request
-from urllib.parse import urlparse
 
 import pandas as pd
 import streamlit as st
@@ -101,7 +98,9 @@ UI = {
         "nessun_dato": "Nessun dato trovato per il ticker {t}. Se il ticker è corretto, Yahoo Finance potrebbe aver limitato le richieste (online capita spesso): riprova tra qualche minuto.",
         "pronto": "Report pronto",
         "interrotta": "Analisi interrotta",
-        "avviso_analista": "Un analista non ha risposto (limite o errore dell'API Gemini): controlla il dettaglio nella scheda «Risposte degli analisti» e riprova tra un minuto.",
+        "avviso_analista": "Un analista non ha risposto (limite o errore dell'API Gemini): nel report la sua sezione risulta non disponibile. Controlla il dettaglio nella scheda «Risposte degli analisti» e riprova tra un minuto.",
+        "pdf_err": "Impossibile generare il PDF: {e}",
+        "pdf_nd": "PDF non disponibile",
         "log": {"contabile": "Analista contabile", "bull": "Analista rialzista",
                 "bear": "Analista ribassista", "macro": "Economista macro e di settore"},
         "ruoli": {"contabile": "Analista Contabile Forense", "bull": "Analista Bull",
@@ -129,13 +128,15 @@ UI = {
                    "Non è consulenza in materia di investimenti.  \n"
                    "I dati vengono da Yahoo Finance e le analisi da modelli linguistici: verifica le cifre."),
         "regole": (
-            " Usa SOLO i dati forniti e non inventare cifre: se un dato manca scrivi N/D. "
+            " Per le cifre usa SOLO i dati forniti e non inventarne: se un dato manca scrivi N/D. "
+            "Per il modello di business, la concorrenza e la regolamentazione puoi usare la tua conoscenza generale, ma senza aggiungere cifre che non sono nei dati. "
             "I rapporti (debito netto/FCF, rendimento da FCF, potenziale sul target) sono già calcolati: citali, non rifarli. "
             "Rispondi con esattamente 2 punti elenco, una frase ciascuno, e cita almeno un numero per punto. "
             "Non usare formule come 'compra' o 'vendi'."
             " Valuta la coerenza tra multipli e crescita (P/E rispetto alla crescita, PEG): non definire elevato un multiplo basso a fronte di una crescita a doppia cifra, né economico uno alto con crescita debole; usa il rapporto già fornito."
             " Esprimi ogni importo nella valuta indicata nei dati e non mescolare valute diverse."
             " Per il debito netto usa la dicitura già fornita (per esempio 'Cassa netta'), senza citarlo come numero negativo."
+            " Se i dati segnalano che free cash flow e debito non sono significativi (banche e assicurazioni), non commentarli."
         ),
         "istruzioni": {
             "contabile": (
@@ -176,7 +177,9 @@ UI = {
         "nessun_dato": "No data found for ticker {t}. If the ticker is right, Yahoo Finance may be limiting requests (common online): try again in a few minutes.",
         "pronto": "Report ready",
         "interrotta": "Analysis interrupted",
-        "avviso_analista": "An analyst did not answer (Gemini API limit or error): check the details in the \"Analyst responses\" tab and try again in a minute.",
+        "avviso_analista": "An analyst did not answer (Gemini API limit or error): its section is shown as unavailable in the report. Check the details in the \"Analyst responses\" tab and try again in a minute.",
+        "pdf_err": "Unable to generate the PDF: {e}",
+        "pdf_nd": "PDF not available",
         "log": {"contabile": "Accounting analyst", "bull": "Bull analyst",
                 "bear": "Bear analyst", "macro": "Macro and sector economist"},
         "ruoli": {"contabile": "Forensic Accounting Analyst", "bull": "Bull Analyst",
@@ -204,13 +207,15 @@ UI = {
                    "This is not investment advice.  \n"
                    "Data comes from Yahoo Finance and the analyses from language models: verify the figures."),
         "regole": (
-            " Use ONLY the data provided and do not invent figures: if a figure is missing, write N/A. "
+            " For figures use ONLY the data provided and do not invent any: if a figure is missing, write N/A. "
+            "For the business model, competition and regulation you may use your general knowledge, but without adding figures that are not in the data. "
             "The ratios (net debt/FCF, FCF yield, upside to target) are already calculated: quote them, do not recalculate them. "
             "Reply with exactly 2 bullet points, one sentence each, and cite at least one number per point. "
             "Do not use phrases such as 'buy' or 'sell'."
             " Check the consistency between multiples and growth (P/E relative to growth, PEG): do not call a low multiple 'high' when growth is double-digit, nor a high multiple cheap when growth is weak; use the ratio already provided."
             " State every amount in the currency given in the data and never mix currencies."
             " For net debt use the wording already provided (for example 'Net cash'), without quoting it as a negative number."
+            " If the data say that free cash flow and debt are not meaningful (banks and insurers), do not comment on them."
         ),
         "istruzioni": {
             "contabile": (
@@ -238,6 +243,13 @@ TICKER_VALIDO = r"[A-Z0-9.\-=^]{1,15}"
 # Prefissi delle risposte di errore restituite da chiedi_agente quando l'API
 # non risponde (vedi main.py): servono per avvisare l'utente.
 PREFISSI_ERRORE_API = ("- Dati al momento non disponibili", "- Data currently unavailable")
+
+# Cambi fissi tra sottounità (pence, centesimi, agorot) e valuta principale.
+CAMBI_FISSI = {
+    ("GBP", "GBp"): 100.0, ("GBp", "GBP"): 0.01,
+    ("ZAR", "ZAc"): 100.0, ("ZAc", "ZAR"): 0.01,
+    ("ILS", "ILA"): 100.0, ("ILA", "ILS"): 0.01,
+}
 
 
 # ------------------------------------------------------------------ dati
@@ -271,10 +283,8 @@ def scarica_cambio(da: str, a: str):
     dall'ultima chiusura su Yahoo Finance. None se non disponibile."""
     if da == a:
         return 1.0
-    if (da, a) == ("GBP", "GBp"):
-        return 100.0
-    if (da, a) == ("GBp", "GBP"):
-        return 0.01
+    if (da, a) in CAMBI_FISSI:
+        return CAMBI_FISSI[(da, a)]
     try:
         storico = yf.Ticker(f"{da}{a}=X").history(period="5d")
         valore = float(storico["Close"].dropna().iloc[-1])
@@ -419,8 +429,8 @@ def esegui_comitato(ticker: str, nome: str, info: dict, m: dict, log, lang: str)
         log(risposta)  # così si vede subito cosa ha scritto (o l'errore)
         return risposta
 
-    # max_t ora viene rispettato da chiedi_agente: valori più bassi = meno
-    # token contati nel limite al minuto dell'API. Le pause distanziano le chiamate.
+    # max_t fissa il limite di uscita (il doppio, per il ragionamento del
+    # modello). Le pause distanziano le chiamate per il limite al minuto.
     contabile = lavora("contabile", max_t=900, pausa=2)
     bull = lavora("bull", max_t=900, pausa=5)
     bear = lavora("bear", max_t=900, pausa=5)
@@ -523,7 +533,6 @@ if avvia:
 
                 m = metriche_titolo(info, lang)
                 storico = scarica_storico(ticker_input)
-                # Usa direttamente il logo di Valore Capital
                 logo = LOGO_URL
 
                 # Concorrenti dello stesso settore per il confronto
@@ -538,16 +547,19 @@ if avvia:
                 esito = esegui_comitato(ticker_input, nome, info, m, st.write, lang)
 
                 # Se un analista non ha risposto per colpa dell'API, avvisa
-                # subito invece di nascondere il problema nel report.
-                if any(str(r).startswith(PREFISSI_ERRORE_API) for r in esito.values()):
+                # subito e nel report mostra "dato non disponibile" invece del
+                # messaggio di errore tecnico (che resta solo nella scheda analisti).
+                errori = {k: str(r).startswith(PREFISSI_ERRORE_API) for k, r in esito.items()}
+                if any(errori.values()):
                     st.warning(T["avviso_analista"])
+                esito_report = {k: (None if errori[k] else r) for k, r in esito.items()}
 
-                # 1. Genera l'immagine del grafico a candele per il PDF
+                # 1. Immagine statica del grafico a candele per il PDF
                 immagine_grafico = genera_grafico_statico_png(storico, m)
 
-                # 2. Genera l'HTML completo per il DOWNLOAD (grafico statico + RSI settimanale)
+                # 2. HTML completo per il DOWNLOAD (grafico statico + RSI settimanale)
                 html_report = genera_report(
-                    ticker_input, nome, info, m, esito, MODELLO,
+                    ticker_input, nome, info, m, esito_report, MODELLO,
                     grafico=grafico_rsi(storico, lang),
                     grafico_statico=immagine_grafico,
                     lang=lang,
@@ -555,14 +567,14 @@ if avvia:
                     confronto=html_confronto,
                 )
 
-                # 3. Genera il PDF partendo dall'HTML completo
+                # 3. PDF a partire dall'HTML completo
                 try:
                     pdf_bytes = genera_pdf_da_html(html_report)
                 except Exception as e_pdf:
-                    st.warning(f"Impossibile generare il PDF: {e_pdf}")
+                    st.warning(T["pdf_err"].format(e=e_pdf))
                     pdf_bytes = None
 
-                # 4. Genera il frammento HTML per la VISUALIZZAZIONE A SCHERMO
+                # 4. Frammento HTML per la VISUALIZZAZIONE A SCHERMO
                 #    (TradingView interattivo + RSI settimanale con divergenze)
                 grafico_completo = (
                     grafico_tradingview(ticker_input, storico, m, lang)
@@ -570,7 +582,7 @@ if avvia:
                 )
 
                 html_schermo = genera_frammento_report(
-                    ticker_input, nome, info, m, esito, MODELLO,
+                    ticker_input, nome, info, m, esito_report, MODELLO,
                     grafico=grafico_completo,
                     lang=lang,
                     logo=logo,
@@ -620,7 +632,7 @@ if risultato:
                     use_container_width=True
                 )
             else:
-                st.button("PDF non disponibile", disabled=True, use_container_width=True)
+                st.button(T["pdf_nd"], disabled=True, use_container_width=True)
 
         with col_dl_html:
             st.download_button(
