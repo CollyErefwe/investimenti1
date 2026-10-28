@@ -11,6 +11,7 @@ import html
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -1350,13 +1351,22 @@ def genera_grafico_statico_png(storico: list, m: dict) -> str:
 
 
 def genera_pdf_da_html(html_content: str) -> bytes:
-    """Converte l'HTML in PDF usando Playwright (Chromium invisibile).
-    Se Chromium non è installato prova a scaricarlo una volta."""
+    """Converte l'HTML in PDF con Chromium (via Playwright).
+
+    Se sul sistema c'è un Chromium installato (su Streamlit Cloud: `chromium`
+    in packages.txt) usa quello; altrimenti prova il Chromium di Playwright
+    e, se manca, lo scarica una volta."""
     from playwright.sync_api import sync_playwright
 
-    def stampa() -> bytes:
+    sistema = (shutil.which("chromium") or shutil.which("chromium-browser")
+               or shutil.which("google-chrome"))
+
+    def stampa(percorso=None) -> bytes:
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            opzioni = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+            if percorso:
+                opzioni["executable_path"] = percorso
+            browser = p.chromium.launch(**opzioni)
             try:
                 page = browser.new_page()
                 page.set_content(html_content, wait_until="networkidle")
@@ -1368,6 +1378,8 @@ def genera_pdf_da_html(html_content: str) -> bytes:
             finally:
                 browser.close()
 
+    if sistema:
+        return stampa(sistema)
     try:
         return stampa()
     except Exception as e:
