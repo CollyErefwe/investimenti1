@@ -6,20 +6,24 @@ con dati di fantasia.
 """
 from __future__ import annotations
 
+import base64
 import html
+import io
 import json
 import re
+import subprocess
+import sys
 import time
-import base64
-import io
-
 from contextvars import ContextVar
-from datetime import date
+from datetime import date, datetime
 
-# Import per il grafico statico e il PDF
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import pandas as pd
+import matplotlib
+
+matplotlib.use("Agg")  # nessuna GUI: sicuro nei thread di Streamlit
+import matplotlib.dates as mdates  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
+from matplotlib.figure import Figure  # noqa: E402
 
 # ------------------------------------------------------------------ lingua
 # La lingua corrente vive in una ContextVar: ogni sessione Streamlit gira nel
@@ -31,16 +35,20 @@ STR = {
         "nd": "N/D", "mld": "mld", "mln": "mln",
         "av_prezzo": "Prezzo non disponibile.",
         "av_fcf": "Free cash flow non disponibile: i rapporti che lo usano non sono calcolati.",
+        "av_fin": "Banca o assicurazione: free cash flow, debito, cassa ed EV/EBITDA non sono significativi per questo tipo di società e non sono mostrati.",
         "av_valuta": "Il prezzo è in {v} e il bilancio in {vb}: rendimento e multiplo sul free cash flow non sono calcolati.",
         "av_conv": "Bilancio in {vb} convertito in {v} al cambio di {c}: free cash flow, cassa, debito, EV ed EBITDA sono espressi in {v}.",
         "cassa_netta": "Cassa netta", "fcf_neg": "FCF non positivo", "anni_fcf": "anni di FCF",
         "margine_netto": "Margine netto", "margine_op": "Margine operativo", "roe": "ROE",
         "crescita": "Crescita ricavi (trimestre su anno)", "fcf": "Free cash flow", "cassa": "Cassa",
+        "crescita_utili": "Crescita utili (trimestre su anno)",
         "debito": "Debito totale", "debito_netto": "Debito netto", "dn_fcf": "Debito netto rispetto al FCF",
+        "de": "Debito / patrimonio netto",
         "payout": "Payout ratio (utili distribuiti)", "div_yield": "Rendimento da dividendo",
         "nessun_div": "Nessun dividendo",
         "mcap": "Capitalizzazione", "ev": "Valore d'impresa (EV)", "pe_fwd": "P/E atteso (forward)",
         "pe_trail": "P/E storico (trailing)", "ev_ebitda": "EV / EBITDA", "p_fcf": "Prezzo / free cash flow",
+        "pb": "Prezzo / patrimonio netto (P/B)", "peg": "PEG (Yahoo Finance)", "beta": "Beta",
         "fcf_yield": "Rendimento da free cash flow", "upside": "Potenziale rispetto al target medio",
         "prezzo": "Prezzo", "range52": "Minimo / massimo 52 settimane", "range_target": "Target minimo / medio / massimo",
         "ag_azienda": "Azienda", "ag_settore": "Settore", "ag_industria": "Industria", "ag_mcap": "Capitalizzazione",
@@ -62,8 +70,8 @@ STR = {
         "tv_1a": "1A", "tv_2a": "2A",
         "tv_f50": "Media 50 giorni", "tv_f200": "Media 200 giorni", "tv_fprezzo": "prezzo",
         "tv_fdist": "Distanza dal target medio", "tv_fmax": "Dal massimo 52 settimane", "tv_fmin": "Dal minimo 52 settimane",
-        "tv_nota": ("Valori in {v}. Fascia azzurra: intervallo dei target degli analisti. "
-                    "Linea blu continua: target medio. Linea nera punteggiata: prezzo attuale. "
+        "tv_nota": ("Valori in {v}. Linee grigie: target minimo, medio e massimo degli analisti. "
+                    "Linea nera: prezzo attuale. "
                     "Linea arancione: media a 50 giorni. Linea viola: media a 200 giorni. "
                     "Prezzi da Yahoo Finance, fonte non ufficiale."),
         # --- RSI (settimanale) ---
@@ -77,7 +85,7 @@ STR = {
         "rsi_nota": ("RSI a 14 periodi (metodo Wilder) calcolato sulle chiusure settimanali: "
                      "ogni punto è una settimana, l'ultima è quella in corso. Linee a 30 e 70. "
                      "La divergenza è segnalata quando prezzo e RSI si muovono in direzioni opposte "
-                     "tra due pivot consecutivi."),
+                     "tra due pivot consecutivi ravvicinati; un pivot è confermato solo dopo alcune settimane."),
         "rsi_valore_attuale": "RSI settimanale attuale: {x}",
         # --- confronto con i concorrenti ---
         "conf_titolo": "Confronto con i concorrenti",
@@ -96,7 +104,7 @@ STR = {
                         "e mezzo anno di FCF per la leva. Confronto indicativo: valute e principi contabili possono differire "
                         "e un multiplo basso non implica che il titolo sia sottovalutato."),
         "html_lang": "it", "titolo_report": "Report del comitato", "data_fmt": "%d/%m/%Y",
-        "report_del": "Report del {d}", "dati_alle": "Dati aggiornati alle {t}",
+        "report_del": "Report del {d}", "dati_alle": "Generato alle {t} · dati Yahoo Finance, possibili ritardi",
         "settore_nd": "Settore non disponibile",
         "h_prezzo_target": "Prezzo e target", "h_bull": "Tesi rialzista", "h_bear": "Tesi ribassista",
         "h_qualita": "Qualità e solidità", "h_valutazione": "Valutazione",
@@ -112,16 +120,20 @@ STR = {
         "nd": "N/A", "mld": "bn", "mln": "mn",
         "av_prezzo": "Price not available.",
         "av_fcf": "Free cash flow not available: the ratios that use it are not calculated.",
+        "av_fin": "Bank or insurer: free cash flow, debt, cash and EV/EBITDA are not meaningful for this type of company and are not shown.",
         "av_valuta": "The price is in {v} and the financial statements in {vb}: free cash flow yield and multiple are not calculated.",
         "av_conv": "Financial statements in {vb} converted to {v} at {c}: free cash flow, cash, debt, EV and EBITDA are stated in {v}.",
         "cassa_netta": "Net cash", "fcf_neg": "FCF not positive", "anni_fcf": "years of FCF",
         "margine_netto": "Net margin", "margine_op": "Operating margin", "roe": "ROE",
         "crescita": "Revenue growth (quarter on year)", "fcf": "Free cash flow", "cassa": "Cash",
+        "crescita_utili": "Earnings growth (quarter on year)",
         "debito": "Total debt", "debito_netto": "Net debt", "dn_fcf": "Net debt to FCF",
+        "de": "Debt / equity",
         "payout": "Payout ratio (earnings distributed)", "div_yield": "Dividend yield",
         "nessun_div": "No dividend",
         "mcap": "Market cap", "ev": "Enterprise value (EV)", "pe_fwd": "Forward P/E",
         "pe_trail": "Trailing P/E", "ev_ebitda": "EV / EBITDA", "p_fcf": "Price / free cash flow",
+        "pb": "Price / book (P/B)", "peg": "PEG (Yahoo Finance)", "beta": "Beta",
         "fcf_yield": "Free cash flow yield", "upside": "Upside to mean target",
         "prezzo": "Price", "range52": "52-week low / high", "range_target": "Target low / mean / high",
         "ag_azienda": "Company", "ag_settore": "Sector", "ag_industria": "Industry", "ag_mcap": "Market cap",
@@ -143,8 +155,8 @@ STR = {
         "tv_1a": "1Y", "tv_2a": "2Y",
         "tv_f50": "50-day average", "tv_f200": "200-day average", "tv_fprezzo": "price",
         "tv_fdist": "Distance from mean target", "tv_fmax": "From 52-week high", "tv_fmin": "From 52-week low",
-        "tv_nota": ("Values in {v}. Blue band: range of analyst targets. "
-                    "Solid blue line: mean target. Dotted black line: current price. "
+        "tv_nota": ("Values in {v}. Grey lines: low, mean and high analyst targets. "
+                    "Black line: current price. "
                     "Orange line: 50-day average. Purple line: 200-day average. "
                     "Prices from Yahoo Finance, unofficial source."),
         # --- RSI (weekly) ---
@@ -158,7 +170,7 @@ STR = {
         "rsi_nota": ("14-period RSI (Wilder method) computed on weekly closes: "
                      "each point is one week, the last being the current week. Lines at 30 and 70. "
                      "A divergence is flagged when price and RSI move in opposite directions "
-                     "between two consecutive pivots."),
+                     "between two consecutive, closely spaced pivots; a pivot is only confirmed after a few weeks."),
         "rsi_valore_attuale": "Current weekly RSI: {x}",
         # --- peer comparison ---
         "conf_titolo": "Peer comparison",
@@ -177,7 +189,7 @@ STR = {
                         "and half a year of FCF for leverage. Indicative comparison: currencies and accounting standards may differ "
                         "and a low multiple does not mean the stock is undervalued."),
         "html_lang": "en", "titolo_report": "Committee report", "data_fmt": "%d %b %Y",
-        "report_del": "Report dated {d}", "dati_alle": "Data as of {t}",
+        "report_del": "Report dated {d}", "dati_alle": "Generated at {t} · Yahoo Finance data, may be delayed",
         "settore_nd": "Sector not available",
         "h_prezzo_target": "Price and target", "h_bull": "Bull case", "h_bear": "Bear case",
         "h_qualita": "Quality and strength", "h_valutazione": "Valuation",
@@ -206,6 +218,15 @@ def _nd() -> str:
     return _t("nd")
 
 
+def _adesso() -> datetime:
+    """Ora di Roma (il server, ad esempio Streamlit Cloud, gira in UTC)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Rome"))
+    except Exception:
+        return datetime.now()
+
+
 # ------------------------------------------------------------------ numeri
 
 def _num(v):
@@ -217,6 +238,14 @@ def _num(v):
     if x != x or x in (float("inf"), float("-inf")):
         return None
     return x
+
+
+def _primo(*valori):
+    """Primo valore non None (a differenza di `or`, tiene anche gli zeri)."""
+    for v in valori:
+        if v is not None:
+            return v
+    return None
 
 
 def _it(x, dec=2):
@@ -245,6 +274,11 @@ def fmt_x(v, dec=1):
     return _nd() if x is None else f"{_it(x, dec)}x"
 
 
+def fmt_num(v, dec=2):
+    x = _num(v)
+    return _nd() if x is None else _it(x, dec)
+
+
 def fmt_grande(v, valuta):
     x = _num(v)
     if x is None:
@@ -259,6 +293,16 @@ def fmt_grande(v, valuta):
 
 
 # ---------------------------------------------------------------- metriche
+
+SOTTOUNITA = ("GBp", "ZAc", "ILA")  # quotazioni in pence, centesimi, agorot
+_INDUSTRIE_FINANZIARIE = ("bank", "insurance", "mortgage")
+
+
+def _e_finanziaria(info: dict) -> bool:
+    """Banche e assicurazioni: FCF, debito ed EV/EBITDA non hanno senso."""
+    industria = (info.get("industry") or "").lower()
+    return any(k in industria for k in _INDUSTRIE_FINANZIARIE)
+
 
 def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict:
     """Ricava dai dati grezzi di Yahoo Finance i rapporti che NON devono
@@ -276,6 +320,7 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
     valuta_bilancio = info.get("financialCurrency") or valuta
     stessa_valuta = valuta == valuta_bilancio
     convertito = False
+    finanziaria = _e_finanziaria(info)
 
     prezzo = g("currentPrice") or g("regularMarketPrice")
     target = g("targetMeanPrice")
@@ -287,6 +332,9 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
     ev = g("enterpriseValue")
     ev_ebitda = g("enterpriseToEbitda")
     minimo, massimo = g("fiftyTwoWeekLow"), g("fiftyTwoWeekHigh")
+
+    if finanziaria:
+        fcf = cassa = debito = ebitda = ev = ev_ebitda = None
 
     if not stessa_valuta:
         if cambio:
@@ -319,9 +367,16 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
 
     # Dividendi: rendimento = dividendo annuo / prezzo (il campo dividendYield
     # di Yahoo ha cambiato scala nelle versioni recenti, meglio non usarlo).
+    # Con quotazioni in pence/centesimi dividendo e prezzo possono avere unità
+    # diverse: lì si usa il rendimento trailing di Yahoo, se c'è.
     dividendo = g("dividendRate") or g("trailingAnnualDividendRate")
     paga_div = bool(dividendo and dividendo > 0)
-    div_yield = (dividendo / prezzo if prezzo else g("trailingAnnualDividendYield")) if paga_div else None
+    if not paga_div:
+        div_yield = None
+    elif valuta in SOTTOUNITA:
+        div_yield = g("trailingAnnualDividendYield")
+    else:
+        div_yield = dividendo / prezzo if prezzo else g("trailingAnnualDividendYield")
     payout = g("payoutRatio") if paga_div else None
 
     # P/E rispetto alla crescita dei ricavi (indicativo, non è il vero PEG,
@@ -329,10 +384,15 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
     pe_fwd, crescita = g("forwardPE"), g("revenueGrowth")
     peg_ricavi = pe_fwd / (crescita * 100) if pe_fwd and pe_fwd > 0 and crescita and crescita > 0 else None
 
+    de = g("debtToEquity")  # Yahoo lo dà in percentuale (150 = 1,5x)
+    de = de / 100 if de is not None and not finanziaria else None
+
     avvisi = []
     if prezzo is None:
         avvisi.append(_t("av_prezzo"))
-    if fcf is None:
+    if finanziaria:
+        avvisi.append(_t("av_fin"))
+    elif fcf is None:
         avvisi.append(_t("av_fcf"))
     if convertito:
         avvisi.append(_t("av_conv").format(vb=valuta_bilancio, v=valuta, c=_it(cambio, 4)))
@@ -342,6 +402,7 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
     return {
         "valuta": valuta,
         "valuta_bilancio": valuta if convertito else valuta_bilancio,
+        "finanziaria": finanziaria,
         "prezzo": prezzo,
         "target": target,
         "target_min": g("targetLowPrice"),
@@ -360,10 +421,14 @@ def calcola_metriche(info: dict, lang: str = None, cambio: float = None) -> dict
         "pe_fwd": pe_fwd,
         "pe_trail": g("trailingPE"),
         "ev_ebitda": ev_ebitda,
+        "pb": g("priceToBook"),
+        "peg": _primo(g("trailingPegRatio"), g("pegRatio")),
+        "de": de,
         "margine_netto": g("profitMargins"),
         "margine_op": g("operatingMargins"),
         "roe": g("returnOnEquity"),
         "crescita_ricavi": crescita,
+        "crescita_utili": _primo(g("earningsQuarterlyGrowth"), g("earningsGrowth")),
         "paga_div": paga_div,
         "div_yield": div_yield,
         "payout": payout,
@@ -396,11 +461,13 @@ def righe_qualita(m):
         (_t("margine_op"), fmt_pct(m["margine_op"])),
         (_t("roe"), fmt_pct(m["roe"])),
         (_t("crescita"), fmt_pct(m["crescita_ricavi"], segno=True)),
+        (_t("crescita_utili"), fmt_pct(m["crescita_utili"], segno=True)),
         (_t("fcf"), fmt_grande(m["fcf"], vb)),
         (_t("cassa"), fmt_grande(m["cassa"], vb)),
         (_t("debito"), fmt_grande(m["debito"], vb)),
         (_t("debito_netto"), fmt_grande(m["debito_netto"], vb)),
         (_t("dn_fcf"), _ratio_debito(m)),
+        (_t("de"), fmt_x(m["de"])),
         (_t("payout"), fmt_pct(m["payout"]) if m["paga_div"] else _t("nessun_div")),
     ]
 
@@ -412,11 +479,14 @@ def righe_valutazione(m):
         (_t("ev"), fmt_grande(m["ev"], v)),
         (_t("pe_fwd"), fmt_x(m["pe_fwd"])),
         (_t("pe_trail"), fmt_x(m["pe_trail"])),
+        (_t("peg"), fmt_num(m["peg"])),
+        (_t("pb"), fmt_x(m["pb"])),
         (_t("ev_ebitda"), fmt_x(m["ev_ebitda"])),
         (_t("p_fcf"), fmt_x(m["p_fcf"])),
         (_t("fcf_yield"), fmt_pct(m["fcf_yield"])),
         (_t("div_yield"), fmt_pct(m["div_yield"]) if m["paga_div"] else _t("nessun_div")),
         (_t("upside"), fmt_pct(m["upside"], segno=True)),
+        (_t("beta"), fmt_num(m["beta"])),
     ]
 
 
@@ -444,6 +514,16 @@ def _mld(x):
     return _nd() if x is None else f"{x / 1e9:.2f} {_t('mld')}"
 
 
+def _debito_netto_testo(m):
+    """Debito netto per gli agenti: mai un numero negativo, ma 'Cassa netta'."""
+    dn, vb = m["debito_netto"], m["valuta_bilancio"]
+    if dn is None:
+        return _nd()
+    if dn <= 0:
+        return f"{_t('cassa_netta')} ({_mld(-dn)} {vb})"
+    return f"{_mld(dn)} {vb}"
+
+
 def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict, lang: str = None) -> str:
     """Scheda dati consegnata a tutti gli analisti. I rapporti sono già
     calcolati: gli agenti non devono rifarli."""
@@ -456,14 +536,16 @@ def dati_per_agenti(nome: str, ticker: str, info: dict, m: dict, lang: str = Non
         f"{_t('ag_52')}: {_raw(m['min52'])} - {_raw(m['max52'])} {v}",
         f"{_t('ag_target')}: {_raw(m['target_min'])} / {_raw(m['target'])} / {_raw(m['target_max'])} {v}"
         f" | {_t('ag_upside')}: {_raw(m['upside'], 1, pct=True)}",
-        f"P/E forward: {_raw(m['pe_fwd'], 1)} | P/E trailing: {_raw(m['pe_trail'], 1)} | EV/EBITDA: {_raw(m['ev_ebitda'], 1)}",
+        f"P/E forward: {_raw(m['pe_fwd'], 1)} | P/E trailing: {_raw(m['pe_trail'], 1)} | EV/EBITDA: {_raw(m['ev_ebitda'], 1)}"
+        f" | P/B: {_raw(m['pb'], 1)} | PEG: {_raw(m['peg'], 2)} | Beta: {_raw(m['beta'], 2)}",
         f"{_t('ag_peg')}: {_raw(m['peg_ricavi'], 2)}",
         f"{_t('ag_pfcf')}: {_raw(m['p_fcf'], 1)} | {_t('ag_yield')}: {_raw(m['fcf_yield'], 1, pct=True)}",
         f"{_t('margine_netto')}: {_raw(m['margine_netto'], 1, pct=True)} | {_t('margine_op')}: {_raw(m['margine_op'], 1, pct=True)}"
         f" | ROE: {_raw(m['roe'], 1, pct=True)}",
-        f"{_t('ag_crescita')}: {_raw(m['crescita_ricavi'], 1, pct=True)}",
+        f"{_t('ag_crescita')}: {_raw(m['crescita_ricavi'], 1, pct=True)} | {_t('crescita_utili')}: {_raw(m['crescita_utili'], 1, pct=True)}",
         f"{_t('fcf')}: {_mld(m['fcf'])} {vb} | {_t('cassa')}: {_mld(m['cassa'])} {vb} | {_t('debito')}: {_mld(m['debito'])} {vb}",
-        f"{_t('debito_netto')}: {_mld(m['debito_netto'])} {vb} | {_t('ag_dnfcf')}: {_ratio_debito(m)}",
+        f"{_t('debito_netto')}: {_debito_netto_testo(m)} | {_t('ag_dnfcf')}: {_ratio_debito(m)}"
+        f" | {_t('de')}: {_raw(m['de'], 2)}",
         f"{_t('ag_div')}: " + (
             f"{fmt_pct(m['div_yield'])} | {_t('payout')}: {fmt_pct(m['payout'])}"
             if m["paga_div"] else _t("nessun_div")),
@@ -495,8 +577,6 @@ _TV_CSS = """
 .tv-barra button{font:600 11px var(--sans);padding:3px 11px;border:1px solid var(--rule);background:#fff;color:var(--slate);cursor:pointer}
 .tv-barra button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 .tv-box{position:relative;height:320px;border:1px solid var(--rule);overflow:hidden}
-.tv-banda{position:absolute;left:0;display:none;pointer-events:none;z-index:3;
-background:rgba(200, 200, 200, 0.1);border-top:1px solid rgba(200, 200, 200, 0.3);border-bottom:1px solid rgba(200, 200, 200, 0.3)}
 .tv-fatti{display:flex;flex-wrap:wrap;gap:4px 22px;margin-top:6px;font-size:11.5px;color:var(--slate)}
 .tv-fatti b{color:var(--ink);font-variant-numeric:tabular-nums}
 @media print{.tv{display:none}}
@@ -553,17 +633,17 @@ _TV_JS = """
   function linea(prezzo, titolo, coloreLinea, coloreSfondo, coloreTesto, spessore) {
     if (prezzo === null) return;
     cs.createPriceLine({
-      price: prezzo, 
-      title: titolo, 
-      color: coloreLinea, 
-      lineWidth: spessore, 
+      price: prezzo,
+      title: titolo,
+      color: coloreLinea,
+      lineWidth: spessore,
       lineStyle: 0, // 0 = linea continua
-      axisLabelVisible: true, 
-      axisLabelColor: coloreSfondo, 
+      axisLabelVisible: true,
+      axisLabelColor: coloreSfondo,
       axisLabelTextColor: coloreTesto
     });
   }
-  
+
   // I target usano un grigio chiaro continuo. Il prezzo usa un nero.
   var STILE_ESTREMI = {linea: '#94a3b8', sfondo: '#e2e8f0', testo: '#475569'};
   var STILE_MEDIO   = {linea: '#94a3b8', sfondo: '#e2e8f0', testo: '#475569'};
@@ -734,8 +814,9 @@ def _pivot_locali(serie, finestra=5):
     return massimi, minimi
 
 
-def _trova_divergenze(prezzi, rsi, finestra=5, sguardo=25):
-    """Cerca divergenze rialziste e ribassiste tra ultimi due pivot di prezzo.
+def _trova_divergenze(prezzi, rsi, finestra=5, sguardo=25, distanza_max=30):
+    """Cerca divergenze rialziste e ribassiste tra pivot di prezzo consecutivi
+    e ravvicinati (al massimo `distanza_max` settimane l'uno dall'altro).
     Restituisce lista di dict: {tipo, i1, i2} con gli indici degli estremi.
     - rialzista: prezzo fa minimi più bassi, RSI fa minimi più alti.
     - ribassista: prezzo fa massimi più alti, RSI fa massimi più bassi."""
@@ -746,18 +827,22 @@ def _trova_divergenze(prezzi, rsi, finestra=5, sguardo=25):
 
     # Divergenze rialziste sui minimi
     if len(idx_minimi_p) >= 2:
-        ultimi = idx_minimi_p[-sguardo:] if len(idx_minimi_p) > sguardo else idx_minimi_p
+        ultimi = idx_minimi_p[-sguardo:]
         for k in range(len(ultimi) - 1):
             i1, i2 = ultimi[k], ultimi[k + 1]
+            if i2 - i1 > distanza_max:
+                continue
             if prezzi[i2] < prezzi[i1] and rsi[i1] is not None and rsi[i2] is not None:
                 if rsi[i2] > rsi[i1] + 1.5:  # tolleranza minima
                     divergenze.append({"tipo": "rialzista", "i1": i1, "i2": i2})
 
     # Divergenze ribassiste sui massimi
     if len(idx_massimi_p) >= 2:
-        ultimi = idx_massimi_p[-sguardo:] if len(idx_massimi_p) > sguardo else idx_massimi_p
+        ultimi = idx_massimi_p[-sguardo:]
         for k in range(len(ultimi) - 1):
             i1, i2 = ultimi[k], ultimi[k + 1]
+            if i2 - i1 > distanza_max:
+                continue
             if prezzi[i2] > prezzi[i1] and rsi[i1] is not None and rsi[i2] is not None:
                 if rsi[i2] < rsi[i1] - 1.5:
                     divergenze.append({"tipo": "ribassista", "i1": i1, "i2": i2})
@@ -776,7 +861,7 @@ _RSI_CSS = """
 color:var(--ink);margin:0}
 .rsi-head .cur{font-size:12px;color:var(--slate);font-variant-numeric:tabular-nums}
 .rsi-head .cur b{color:var(--ink)}
-.rsi-svg{display:block;width:100%;height:150px}
+.rsi-svg{display:block;width:100%;height:auto}
 .rsi-legenda{display:flex;flex-wrap:wrap;gap:4px 18px;margin-top:4px;font-size:10.5px;color:var(--slate)}
 .rsi-legenda .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;
 vertical-align:middle}
@@ -838,34 +923,21 @@ def grafico_rsi(storico, lang: str = None) -> str:
             f'<circle cx="{x2:.1f}" cy="{y2:.1f}" r="3" fill="{colore}"/>'
         )
 
-    # Etichette asse Y e linee 30/50/70 (tutte continue)
+    # Linee 30/50/70 con etichette sull'asse Y
     etichette = ""
+    for livello, colore_linea, dim, colore_testo in (
+        (50, "#e2e8f0", 10, "#94a3b8"),
+        (70, "#cbd5e1", 11, "#64748b"),
+        (30, "#cbd5e1", 11, "#64748b"),
+    ):
+        etichette += (
+            f'<line x1="{pad_l}" y1="{y(livello):.1f}" x2="{W - pad_r}" y2="{y(livello):.1f}" '
+            f'stroke="{colore_linea}" stroke-width="1"/>'
+            f'<text x="{pad_l - 6}" y="{y(livello) + 4:.1f}" text-anchor="end" '
+            f'font-size="{dim}" fill="{colore_testo}">{livello}</text>'
+        )
 
-    # Linea 50 (continua, grigio chiarissimo)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(50):.1f}" x2="{W - pad_r}" y2="{y(50):.1f}" '
-        f'stroke="#e2e8f0" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(50) + 4:.1f}" text-anchor="end" '
-        f'font-size="10" font-weight="normal" fill="#94a3b8">50</text>'
-    )
-
-    # Linea 70 (continua, grigio chiaro)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(70):.1f}" x2="{W - pad_r}" y2="{y(70):.1f}" '
-        f'stroke="#cbd5e1" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(70) + 4:.1f}" text-anchor="end" '
-        f'font-size="11" font-weight="normal" fill="#64748b">70</text>'
-    )
-
-    # Linea 30 (continua, grigio chiaro)
-    etichette += (
-        f'<line x1="{pad_l}" y1="{y(30):.1f}" x2="{W - pad_r}" y2="{y(30):.1f}" '
-        f'stroke="#cbd5e1" stroke-width="1"/>'
-        f'<text x="{pad_l - 6}" y="{y(30) + 4:.1f}" text-anchor="end" '
-        f'font-size="11" font-weight="normal" fill="#64748b">30</text>'
-    )
-
-    valore_attuale = rsi[-1] if rsi[-1] is not None else None
+    valore_attuale = rsi[-1]
     etichetta_attuale = (
         _t("rsi_valore_attuale").format(x=f"{valore_attuale:.1f}")
         if valore_attuale is not None else ""
@@ -873,11 +945,9 @@ def grafico_rsi(storico, lang: str = None) -> str:
 
     # Legenda divergenze
     legenda = []
-    ha_rialz = any(d["tipo"] == "rialzista" for d in divergenze)
-    ha_ribass = any(d["tipo"] == "ribassista" for d in divergenze)
-    if ha_rialz:
+    if any(d["tipo"] == "rialzista" for d in divergenze):
         legenda.append(f'<span><span class="dot v"></span>{_t("rsi_div_rialzista")}</span>')
-    if ha_ribass:
+    if any(d["tipo"] == "ribassista" for d in divergenze):
         legenda.append(f'<span><span class="dot r"></span>{_t("rsi_div_ribassista")}</span>')
     if not legenda:
         legenda.append(f'<span>{_t("rsi_nessuna_div")}</span>')
@@ -890,8 +960,7 @@ def grafico_rsi(storico, lang: str = None) -> str:
         + f'<h3>{_t("rsi_ipercomprato")} / {_t("rsi_ipovenduto")}</h3>'
         + f'<div class="cur"><b>{etichetta_attuale}</b></div>'
         + '</div>'
-        + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" preserveAspectRatio="none" '
-          f'xmlns="http://www.w3.org/2000/svg">'
+        + f'<svg class="rsi-svg" viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg">'
         + etichette
         + f'<polyline points="{punti}" fill="none" stroke="#1d4e6e" stroke-width="1.8"/>'
         + "".join(linee_div)
@@ -1179,7 +1248,7 @@ h1{font:700 28px/1.15 var(--serif);margin:0}
 .logo{width:52px;height:52px;object-fit:contain;border:1px solid var(--rule);padding:5px;background:#fff;flex:none}
 .mono{width:52px;height:52px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;font:700 19px var(--serif);letter-spacing:.02em}
 .sotto{color:var(--slate);margin-top:4px}
-.data{text-align:right;color:var(--slate);font-size:11.5px;white-space:nowrap}
+.data{text-align:right;color:var(--slate);font-size:11.5px}
 h2{font:700 15px/1.3 var(--serif);margin:0 0 8px}
 section{margin-top:22px}
 .nd{color:var(--slate)}
@@ -1236,87 +1305,83 @@ table.cmp{width:100%;border-collapse:collapse;font-size:11.5px}
 # --- FUNZIONI PER IL GRAFICO STATICO E IL PDF ---
 
 def genera_grafico_statico_png(storico: list, m: dict) -> str:
-    """Genera un grafico a candele statico in base64 per il PDF."""
+    """Genera un grafico a candele statico in base64 per il PDF.
+    Usa l'API a oggetti di matplotlib (senza pyplot): sicura nei thread."""
     if not storico or len(storico) < 20:
         return ""
 
     df = pd.DataFrame(storico)
-    df['time'] = pd.to_datetime(df['time'])
+    df["time"] = pd.to_datetime(df["time"])
 
-    fig, ax = plt.subplots(figsize=(8, 3.2))  # Formato perfetto per A4
+    fig = Figure(figsize=(8, 3.2))  # Formato adatto all'A4
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot(111)
 
-    up = df[df.close >= df.open]
-    down = df[df.close < df.open]
+    su = df[df.close >= df.open]
+    giu = df[df.close < df.open]
 
-    # Candele verdi
-    col1 = '#2b7a57'
-    ax.vlines(up.time, up.low, up.high, color=col1, linewidth=1)
-    ax.bar(up.time, up.close - up.open, bottom=up.open, color=col1, width=1.0, align='center')
-
-    # Candele rosse
-    col2 = '#a8412f'
-    ax.vlines(down.time, down.low, down.high, color=col2, linewidth=1)
-    ax.bar(down.time, down.close - down.open, bottom=down.open, color=col2, width=1.0, align='center')
+    verde, rosso = "#2b7a57", "#a8412f"
+    ax.vlines(su.time, su.low, su.high, color=verde, linewidth=1)
+    ax.bar(su.time, su.close - su.open, bottom=su.open, color=verde, width=1.0, align="center")
+    ax.vlines(giu.time, giu.low, giu.high, color=rosso, linewidth=1)
+    ax.bar(giu.time, giu.close - giu.open, bottom=giu.open, color=rosso, width=1.0, align="center")
 
     # Linee target e prezzo
-    if m.get('target'):
-        ax.axhline(m['target'], color='#94a3b8', linestyle='-', linewidth=1.5, label='Target Medio')
-    if m.get('prezzo'):
-        ax.axhline(m['prezzo'], color='#17202b', linestyle='-', linewidth=1, label='Prezzo Attuale')
+    if m.get("target"):
+        ax.axhline(m["target"], color="#94a3b8", linestyle="-", linewidth=1.5)
+    if m.get("prezzo"):
+        ax.axhline(m["prezzo"], color="#17202b", linestyle="-", linewidth=1)
 
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_color('#d6dbe2')
-    ax.spines['bottom'].set_color('#d6dbe2')
-    ax.tick_params(colors='#566273', labelsize=8)
-    ax.grid(True, linestyle='--', alpha=0.3)
-    ax.set_facecolor('#ffffff')
-    fig.patch.set_facecolor('#ffffff')
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %y'))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#d6dbe2")
+    ax.spines["bottom"].set_color("#d6dbe2")
+    ax.tick_params(colors="#566273", labelsize=8)
+    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.set_facecolor("#ffffff")
+    fig.patch.set_facecolor("#ffffff")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    fig.tight_layout()
 
     buf = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format='png', dpi=150)
-    plt.close(fig)
-
+    fig.savefig(buf, format="png", dpi=150)
     buf.seek(0)
-    img_b64 = base64.b64encode(buf.read()).decode('utf-8')
-    return f"data:image/png;base64,{img_b64}"
+    return "data:image/png;base64," + base64.b64encode(buf.read()).decode("utf-8")
 
 
 def genera_pdf_da_html(html_content: str) -> bytes:
-    """Converte l'HTML in PDF usando Playwright (Chromium invisibile)."""
+    """Converte l'HTML in PDF usando Playwright (Chromium invisibile).
+    Se Chromium non è installato prova a scaricarlo una volta."""
     from playwright.sync_api import sync_playwright
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
+    def stampa() -> bytes:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.set_content(html_content, wait_until="networkidle")
+                return page.pdf(
+                    format="A4",
+                    print_background=True,  # stampa i colori di sfondo
+                    margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"},
+                )
+            finally:
+                browser.close()
 
-        # Carica il codice HTML
-        page.set_content(html_content, wait_until="networkidle")
+    try:
+        return stampa()
+    except Exception as e:
+        if "executable" in str(e).lower() or "playwright install" in str(e).lower():
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"],
+                           check=True, timeout=300)
+            return stampa()
+        raise
 
-        # Aspetta un attimo per sicurezza (es. per le immagini base64)
-        time.sleep(0.5)
-
-        # Genera il PDF (formato A4)
-        pdf_bytes = page.pdf(
-            format="A4",
-            print_background=True,  # Importante: stampa i colori di sfondo!
-            margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
-        )
-        browser.close()
-        return pdf_bytes
 
 # -------------------------------------------------------
 
-def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "",
-                  grafico: str = "", grafico_statico: str = "", adatta_iframe: bool = False,
-                  lang: str = None, logo: str = "", confronto: str = "") -> str:
-    """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro.
-    `grafico` è HTML facoltativo inserito sotto 'Prezzo e target' (solo schermo).
-    `grafico_statico` è un'immagine base64 per il PDF.
-    `logo` è un URL o data-URI facoltativo; se manca compare un monogramma."""
-    _imposta(lang)
+def _pagina(ticker, nome, info, m, s, modello, blocco_grafico, logo, confronto) -> str:
+    """Corpo del report (<div class="page">), comune a HTML scaricabile e vista a schermo."""
     esc = html.escape
 
     borsa = info.get("fullExchangeName") or info.get("exchange") or ""
@@ -1336,35 +1401,14 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
         f'<img class="logo" src="{esc(logo, quote=True)}" alt="">' if logo
         else f'<div class="mono">{esc(iniziali)}</div>'
     )
-
-    # Usa il grafico statico se presente (per il PDF), altrimenti quello interattivo.
-    # Il grafico RSI settimanale (SVG) viene sempre mostrato sotto.
-    blocco_grafico = (
-        f'<img src="{grafico_statico}" style="width:100%; height:auto; border:1px solid var(--rule); border-radius:4px; margin-top:10px;" alt="Grafico">'
-        + grafico
-        if grafico_statico else grafico
+    adesso = _adesso()
+    data_txt = (
+        _t("report_del").format(d=adesso.strftime(_t("data_fmt")))
+        + "<br>"
+        + _t("dati_alle").format(t=adesso.strftime("%H:%M %Z").strip())
     )
 
-    # Solo per la vista a schermo: la finestra si adatta all'altezza del report.
-    script_altezza = (
-        "<script>(function(){function a(){try{var f=window.frameElement;"
-        "if(f){f.style.height=document.body.offsetHeight+'px';}}catch(e){}}"
-        "window.addEventListener('load',a);"
-        "if(typeof ResizeObserver!=='undefined'){new ResizeObserver(a).observe(document.body);}a();})();</script>"
-        if adatta_iframe
-        else ""
-    )
-
-    return f"""<!DOCTYPE html>
-<html lang="{_t('html_lang')}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{esc(nome)} ({esc(ticker)}) - {_t('titolo_report')}</title>
-<style>{CSS}</style>
-</head>
-<body>
-<div class="page">
+    return f"""<div class="page">
 <header>
   <div class="brand">
     {marchio}
@@ -1373,7 +1417,7 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
       <div class="sotto">{esc(sigla)}. {esc(settore)}.</div>
     </div>
   </div>
-  <div class="data">{_t('report_del').format(d=time.strftime(_t('data_fmt')))}<br>{_t('dati_alle').format(t=time.strftime('%H:%M'))}</div>
+  <div class="data">{data_txt}</div>
 </header>
 
 <section>
@@ -1415,93 +1459,60 @@ def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello:
     </div>
   </div>
 </footer>
-</div>
+</div>"""
+
+
+def genera_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "",
+                  grafico: str = "", grafico_statico: str = "", adatta_iframe: bool = False,
+                  lang: str = None, logo: str = "", confronto: str = "") -> str:
+    """Report di una pagina (A4). `s` contiene bull, bear, contabile, macro.
+    `grafico` è HTML facoltativo inserito sotto 'Prezzo e target'.
+    `grafico_statico` è un'immagine base64 per il PDF.
+    `logo` è un URL o data-URI facoltativo; se manca compare un monogramma."""
+    _imposta(lang)
+    esc = html.escape
+
+    # Usa il grafico statico se presente (per il PDF), poi sempre l'RSI (SVG).
+    blocco_grafico = (
+        f'<img src="{grafico_statico}" style="width:100%; height:auto; border:1px solid var(--rule); border-radius:4px; margin-top:10px;" alt="Grafico">'
+        + grafico
+        if grafico_statico else grafico
+    )
+
+    # Solo per la vista a schermo: la finestra si adatta all'altezza del report.
+    script_altezza = (
+        "<script>(function(){function a(){try{var f=window.frameElement;"
+        "if(f){f.style.height=document.body.offsetHeight+'px';}}catch(e){}}"
+        "window.addEventListener('load',a);"
+        "if(typeof ResizeObserver!=='undefined'){new ResizeObserver(a).observe(document.body);}a();})();</script>"
+        if adatta_iframe
+        else ""
+    )
+    pagina = _pagina(ticker, nome, info, m, s, modello, blocco_grafico, logo, confronto)
+
+    return f"""<!DOCTYPE html>
+<html lang="{_t('html_lang')}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(nome)} ({esc(ticker)}) - {_t('titolo_report')}</title>
+<style>{CSS}</style>
+</head>
+<body>
+{pagina}
 {script_altezza}
 </body>
 </html>
 """
 
 
-def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "", grafico: str = "", lang: str = None, logo: str = "", confronto: str = "") -> str:
-    """Genera solo il frammento HTML del report (senza <html>, <head>, <body>)
+def genera_frammento_report(ticker: str, nome: str, info: dict, m: dict, s: dict, modello: str = "",
+                            grafico: str = "", lang: str = None, logo: str = "", confronto: str = "") -> str:
+    """Solo il frammento HTML del report (senza <html>, <head>, <body>)
     per essere visualizzato in un iframe di Streamlit."""
     _imposta(lang)
-    esc = html.escape
-
-    borsa = info.get("fullExchangeName") or info.get("exchange") or ""
-    sigla = f"{borsa}: {ticker}" if borsa else ticker
-    settore = ", ".join(x for x in (info.get("sector"), info.get("industry")) if x) or _t("settore_nd")
-
-    note_dati = (
-        f'<div class="foot-note"><h3>{_t("f_note")}</h3>'
-        + "".join(f"<p>{esc(a)}</p>" for a in m["avvisi"])
-        + "</div>"
-        if m["avvisi"]
-        else ""
-    )
-    modello_txt = _t("f_modello").format(m=esc(modello)) if modello else ""
-    iniziali = "".join(w[0] for w in re.findall(r"[A-Za-z0-9]+", nome)[:2]).upper() or ticker[:2]
-    marchio = (
-        f'<img class="logo" src="{esc(logo, quote=True)}" alt="">' if logo
-        else f'<div class="mono">{esc(iniziali)}</div>'
-    )
-
     # Il CSS è incluso nel frammento per non dipendere da quello di Streamlit
-    return f"""
-<style>{CSS}</style>
-<div class="page">
-<header>
-  <div class="brand">
-    {marchio}
-    <div>
-      <h1>{esc(nome)}</h1>
-      <div class="sotto">{esc(sigla)}. {esc(settore)}.</div>
-    </div>
-  </div>
-  <div class="data">{_t('report_del').format(d=time.strftime(_t('data_fmt')))}<br>{_t('dati_alle').format(t=time.strftime('%H:%M'))}</div>
-</header>
-
-<section>
-  <h2>{_t('h_prezzo_target')}</h2>
-  {_grafico_prezzo(m)}
-</section>
-
-{grafico}
-
-<section class="cols">
-  <div class="tesi bull"><h2>{_t('h_bull')}</h2><div class="testo">{testo_html(s.get('bull'))}</div></div>
-  <div class="tesi bear"><h2>{_t('h_bear')}</h2><div class="testo">{testo_html(s.get('bear'))}</div></div>
-</section>
-
-<section class="cols">
-  <div><h2>{_t('h_qualita')}</h2>{_tabella(righe_qualita(m))}</div>
-  <div><h2>{_t('h_valutazione')}</h2>{_tabella(righe_valutazione(m))}</div>
-</section>
-
-{confronto}
-
-<section class="cols">
-  <div><h2>{_t('h_contabile')}</h2><div class="testo">{testo_html(s.get('contabile'))}</div></div>
-  <div><h2>{_t('h_macro')}</h2><div class="testo">{testo_html(s.get('macro'))}</div></div>
-</section>
-
-<footer>
-  {note_dati}
-  <div class="foot">
-    <div>
-      <h3>{_t('f_fonti')}</h3>
-      <p>{_t('f_fonti1')}</p>
-      <p>{_t('f_fonti2')}{modello_txt}</p>
-    </div>
-    <div>
-      <h3>{_t('f_avvert')}</h3>
-      <p>{_t('f_avvert1')}</p>
-      <p>{_t('f_avvert2')}</p>
-    </div>
-  </div>
-</footer>
-</div>
-"""
+    return f"<style>{CSS}</style>\n" + _pagina(ticker, nome, info, m, s, modello, grafico, logo, confronto)
 
 
 if __name__ == "__main__":
